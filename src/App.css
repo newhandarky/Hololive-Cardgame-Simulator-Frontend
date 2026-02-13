@@ -1,5 +1,5 @@
 .app {
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 24px;
   font-family: Arial, sans-serif;
@@ -9,13 +9,22 @@
   border: 1px solid #dcdcdc;
   border-radius: 8px;
   padding: 16px;
+  margin-top: 16px;
 }
 
-.panel-header {
+.row {
   display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  margin-bottom: 12px;
+}
+
+input {
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 160px;
 }
 
 button {
@@ -34,6 +43,7 @@ button:disabled {
 
 .error {
   color: #b91c1c;
+  margin-top: 12px;
 }
 
 ul {
