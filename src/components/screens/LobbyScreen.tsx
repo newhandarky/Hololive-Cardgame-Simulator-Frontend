@@ -17,6 +17,7 @@ interface LobbyScreenProps {
   onMockLineIdChange: (value: string) => void;
   onRoomCodeInputChange: (value: string) => void;
   onSignInAs: () => Promise<void>;
+  onSetupQuickDeck: () => Promise<void>;
   onCreateRoom: () => Promise<void>;
   onJoinRoom: () => Promise<void>;
   onToggleReady: () => Promise<void>;
@@ -39,6 +40,7 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
   onMockLineIdChange,
   onRoomCodeInputChange,
   onSignInAs,
+  onSetupQuickDeck,
   onCreateRoom,
   onJoinRoom,
   onToggleReady,
@@ -61,6 +63,12 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
           <button type="button" onClick={() => void onSignInAs()} disabled={busy}>
             Sign In As This User
           </button>
+          <button type="button" onClick={() => void onSetupQuickDeck()} disabled={busy}>
+            一鍵補測試牌組
+          </button>
+          <Link className="button-link" to="/cards">
+            卡片查詢頁
+          </Link>
           <Link className="button-link" to="/deck-editor">
             編輯卡牌頁
           </Link>

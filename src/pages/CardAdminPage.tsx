@@ -14,7 +14,7 @@ type CardAdminForm = {
   mainColor: string;
   subColor: string;
   hp: string;
-  levelType: 'DEBUT' | 'FIRST' | 'SECOND';
+  levelType: 'DEBUT' | 'FIRST' | 'SECOND' | 'SPOT' | 'BUZZ';
   bloomLevel: string;
   passiveEffectJson: string;
   triggerCondition: string;
@@ -231,6 +231,8 @@ export const CardAdminPage: FC = () => {
               <option value="DEBUT">DEBUT</option>
               <option value="FIRST">FIRST</option>
               <option value="SECOND">SECOND</option>
+              <option value="SPOT">SPOT</option>
+              <option value="BUZZ">BUZZ</option>
             </select>
           </label>
           <label className="card-admin-field">

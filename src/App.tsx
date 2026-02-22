@@ -5,6 +5,7 @@ import './App.css';
 import { GameRoomScreen } from './components/screens/GameRoomScreen';
 import { LobbyScreen } from './components/screens/LobbyScreen';
 import { CardAdminPage } from './pages/CardAdminPage';
+import { CardCatalogPage } from './pages/CardCatalogPage';
 import { DeckEditorPage } from './pages/DeckEditorPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import {
@@ -18,6 +19,7 @@ import {
   joinMatch,
   loginWithLine,
   setMatchReady,
+  setupQuickDeck,
   startMatch,
   type ApiUser,
   type GameState,
@@ -188,6 +190,34 @@ const App: FC = () => {
       }
       throw err;
     }
+  };
+
+  // 將後端回應轉成可讀錯誤訊息，避免只看到固定英文字串
+  const getApiErrorMessage = (err: unknown, fallback: string): string => {
+    if (!axios.isAxiosError(err)) {
+      return fallback;
+    }
+
+    const status = err.response?.status;
+    const statusText = err.response?.statusText;
+    const data = err.response?.data as { message?: string; error?: string } | string | undefined;
+
+    if (typeof data === 'string' && data.trim()) {
+      return data.trim();
+    }
+    if (data && typeof data === 'object') {
+      if (typeof data.message === 'string' && data.message.trim()) {
+        return data.message.trim();
+      }
+      if (typeof data.error === 'string' && data.error.trim()) {
+        return status ? `HTTP ${status}: ${data.error}` : data.error;
+      }
+    }
+
+    if (status) {
+      return `HTTP ${status}${statusText ? ` ${statusText}` : ''}`;
+    }
+    return err.message || fallback;
   };
 
   const loadUsers = async () => {
@@ -370,6 +400,19 @@ const App: FC = () => {
     }
   };
 
+  const handleSetupQuickDeck = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await withReauth(() => setupQuickDeck());
+    } catch (err) {
+      setError(getApiErrorMessage(err, '補齊測試牌組失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleJoinRoom = async () => {
     if (!roomCodeInput.trim()) {
       setError('請先輸入房間代碼');
@@ -385,11 +428,7 @@ const App: FC = () => {
       setRoomCodeInput(match.roomCode);
       navigate('/lobby', { replace: true });
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message ?? 'Failed to join room.');
-      } else {
-        setError('Failed to join room.');
-      }
+      setError(getApiErrorMessage(err, 'Failed to join room.'));
       console.error(err);
     } finally {
       setBusy(false);
@@ -424,11 +463,7 @@ const App: FC = () => {
       await loadGameState(match.matchId);
       navigate(`/game-room/${match.matchId}`, { replace: true });
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message ?? 'Failed to start match.');
-      } else {
-        setError('Failed to start match.');
-      }
+      setError(getApiErrorMessage(err, 'Failed to start match.'));
       console.error(err);
     } finally {
       setBusy(false);
@@ -447,11 +482,7 @@ const App: FC = () => {
       setCurrentMatch(match);
       await loadGameState(match.matchId);
     } catch (err) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message ?? 'End Turn 失敗');
-      } else {
-        setError('End Turn 失敗');
-      }
+      setError(getApiErrorMessage(err, 'End Turn 失敗'));
       console.error(err);
     } finally {
       setBusy(false);
@@ -480,6 +511,7 @@ const App: FC = () => {
               onMockLineIdChange={setMockLineId}
               onRoomCodeInputChange={setRoomCodeInput}
               onSignInAs={handleSignInAs}
+              onSetupQuickDeck={handleSetupQuickDeck}
               onCreateRoom={handleCreateRoom}
               onJoinRoom={handleJoinRoom}
               onToggleReady={handleToggleReady}
@@ -504,6 +536,7 @@ const App: FC = () => {
           }
         />
         <Route path="/deck-editor" element={<DeckEditorPage />} />
+        <Route path="/cards" element={<CardCatalogPage />} />
         <Route path="/card-admin" element={<CardAdminPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

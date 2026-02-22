@@ -67,6 +67,70 @@ export interface CardSummary {
   cardType: string;
   rarity?: string;
   imageUrl?: string;
+  cardNo?: string;
+  expansionCode?: string;
+  mainColor?: string;
+  levelType?: string;
+  life?: number;
+  hp?: number;
+  tags?: string[];
+}
+
+export interface CardSearchParams {
+  keyword?: string;
+  type?: string;
+  rarity?: string;
+  color?: string;
+  levelType?: string;
+  expansionCode?: string;
+  tags?: string[];
+  hasImage?: boolean;
+  sort?: 'cardNo' | 'newest' | 'rarity' | 'name' | 'cardId';
+}
+
+export interface OshiSkillDetail {
+  skillType: string;
+  skillName: string;
+  description?: string;
+  holopowerCost?: number;
+  effectJson?: string;
+}
+
+export interface MemberArtDetail {
+  orderIndex: number;
+  name: string;
+  description?: string;
+  costCheerJson?: string;
+  effectJson?: string;
+}
+
+export interface CardDetail {
+  cardId: string;
+  name: string;
+  cardType: string;
+  rarity?: string;
+  imageUrl?: string;
+  cardNo?: string;
+  expansionCode?: string;
+  sourceUrl?: string;
+  tags: string[];
+  mainColor?: string;
+  subColor?: string;
+  life?: number;
+  hp?: number;
+  levelType?: string;
+  bloomLevel?: number;
+  passiveEffectJson?: string;
+  triggerCondition?: string;
+  supportLimited?: boolean;
+  supportConditionType?: string;
+  supportConditionJson?: string;
+  supportEffectType?: string;
+  supportEffectJson?: string;
+  supportTargetType?: string;
+  cheerColor?: string;
+  oshiSkills: OshiSkillDetail[];
+  memberArts: MemberArtDetail[];
 }
 
 export interface DeckCard {
@@ -109,7 +173,7 @@ export interface AdminCreateCardRequest {
   subColor?: string;
 
   hp?: number;
-  levelType?: 'DEBUT' | 'FIRST' | 'SECOND';
+  levelType?: 'DEBUT' | 'FIRST' | 'SECOND' | 'SPOT' | 'BUZZ';
   bloomLevel?: number;
   passiveEffectJson?: string;
   triggerCondition?: string;
@@ -195,8 +259,18 @@ export const getMatchState = async (matchId: number): Promise<GameState> => {
   return response.data;
 };
 
-export const getCards = async (params?: { type?: string; keyword?: string }): Promise<CardSummary[]> => {
+export const getCards = async (params?: CardSearchParams): Promise<CardSummary[]> => {
   const response = await api.get<CardSummary[]>('/cards', { params });
+  return response.data;
+};
+
+export const getCardDetail = async (cardId: string): Promise<CardDetail> => {
+  const response = await api.get<CardDetail>(`/cards/${encodeURIComponent(cardId)}`);
+  return response.data;
+};
+
+export const getCardTags = async (): Promise<string[]> => {
+  const response = await api.get<string[]>('/cards/tags');
   return response.data;
 };
 
@@ -207,6 +281,11 @@ export const createAdminCard = async (payload: AdminCreateCardRequest): Promise<
 
 export const getMyDeck = async (): Promise<DeckCard[]> => {
   const response = await api.get<DeckCard[]>('/decks/me');
+  return response.data;
+};
+
+export const setupQuickDeck = async (): Promise<DeckCard[]> => {
+  const response = await api.post<DeckCard[]>('/decks/me/quick-setup');
   return response.data;
 };
 
