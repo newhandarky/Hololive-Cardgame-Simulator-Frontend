@@ -74,6 +74,8 @@ export interface CardSummary {
   life?: number;
   hp?: number;
   tags?: string[];
+  selectedVariantId?: number;
+  variantCount?: number;
 }
 
 export interface CardSearchParams {
@@ -114,6 +116,8 @@ export interface CardDetail {
   expansionCode?: string;
   sourceUrl?: string;
   tags: string[];
+  selectedVariantId?: number;
+  variants: CardVariant[];
   mainColor?: string;
   subColor?: string;
   life?: number;
@@ -131,6 +135,14 @@ export interface CardDetail {
   cheerColor?: string;
   oshiSkills: OshiSkillDetail[];
   memberArts: MemberArtDetail[];
+}
+
+export interface CardVariant {
+  id: number;
+  variantCode: string;
+  variantName?: string;
+  imageUrl: string;
+  isDefault: boolean;
 }
 
 export interface DeckCard {
@@ -266,6 +278,11 @@ export const getCards = async (params?: CardSearchParams): Promise<CardSummary[]
 
 export const getCardDetail = async (cardId: string): Promise<CardDetail> => {
   const response = await api.get<CardDetail>(`/cards/${encodeURIComponent(cardId)}`);
+  return response.data;
+};
+
+export const updatePreferredCardVariant = async (cardId: string, variantId: number | null): Promise<CardDetail> => {
+  const response = await api.put<CardDetail>(`/cards/${encodeURIComponent(cardId)}/preferred-variant`, { variantId });
   return response.data;
 };
 

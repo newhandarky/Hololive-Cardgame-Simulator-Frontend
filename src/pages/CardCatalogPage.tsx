@@ -4,6 +4,7 @@ import {
   getCardDetail,
   getCards,
   getCardTags,
+  updatePreferredCardVariant,
   type CardDetail,
   type CardSearchParams,
   type CardSummary,
@@ -23,6 +24,11 @@ interface SearchFormState {
   hasImage: boolean;
   sort: CardSearchParams['sort'];
 }
+
+type EffectJsonValue = {
+  type?: string;
+  effects?: string[];
+};
 
 const initialSearchForm: SearchFormState = {
   keyword: '',
@@ -44,6 +50,16 @@ const parseJsonObject = (raw?: string): Record<string, unknown> | null => {
   } catch {
     return null;
   }
+};
+
+const parseEffectMeta = (raw?: string): EffectJsonValue | null => {
+  if (!raw) return null;
+  const parsed = parseJsonObject(raw);
+  if (!parsed) return null;
+  const type = typeof parsed.type === 'string' ? parsed.type : undefined;
+  const effects = Array.isArray(parsed.effects) ? parsed.effects.filter((item): item is string => typeof item === 'string') : [];
+  if (!type && effects.length === 0) return null;
+  return { type, effects };
 };
 
 const formatJsonValue = (value: unknown): string => {
@@ -76,6 +92,23 @@ const parseCheerCost = (raw?: string): Array<{ color: string; count: number }> =
     .filter((item) => Number.isFinite(item.count) && item.count > 0);
 };
 
+// 將 effect_json 內的主效果(type)與複合效果(effects[])整理成可顯示的標籤，並去除重複。
+const getEffectChips = (raw?: string, fallbackType?: string): string[] => {
+  const meta = parseEffectMeta(raw);
+  const chips: string[] = [];
+
+  const pushUnique = (value?: string) => {
+    if (!value) return;
+    if (!chips.includes(value)) chips.push(value);
+  };
+
+  pushUnique(meta?.type);
+  meta?.effects?.forEach((effect) => pushUnique(effect));
+  pushUnique(fallbackType);
+
+  return chips;
+};
+
 // 卡片查詢頁：使用「官方卡表風格」的搜尋區 + 圖片卡片牆 + 詳細資料抽屜
 export const CardCatalogPage: FC = () => {
   const navigate = useNavigate();
@@ -89,6 +122,7 @@ export const CardCatalogPage: FC = () => {
 
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [savingVariant, setSavingVariant] = useState(false);
 
   const hasActiveFilter = useMemo(() => {
     return (
@@ -144,6 +178,33 @@ export const CardCatalogPage: FC = () => {
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) => (prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]));
+  };
+
+  // 切換使用者偏好變體圖，成功後同步更新詳細資料與列表卡面
+  const selectVariant = async (cardId: string, variantId: number | null) => {
+    setSavingVariant(true);
+    setError(null);
+    try {
+      const updated = await updatePreferredCardVariant(cardId, variantId);
+      setDetail(updated);
+      setCards((prev) =>
+        prev.map((item) =>
+          item.cardId === updated.cardId
+            ? {
+                ...item,
+                imageUrl: updated.imageUrl,
+                selectedVariantId: updated.selectedVariantId,
+                variantCount: updated.variants.length,
+              }
+            : item
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      setError('切換卡圖失敗，請稍後再試。');
+    } finally {
+      setSavingVariant(false);
+    }
   };
 
   useEffect(() => {
@@ -337,6 +398,38 @@ export const CardCatalogPage: FC = () => {
                   {detail.hp ? <p>HP：{detail.hp}</p> : null}
                   {detail.life ? <p>LIFE：{detail.life}</p> : null}
                   {detail.tags.length > 0 ? <p>Tags：{detail.tags.join(' ')}</p> : null}
+                  {detail.variants.length > 0 ? (
+                    <div className="card-detail-modal__block">
+                      <h3>卡圖版本</h3>
+                      <div className="card-detail-modal__variant-tools">
+                        <button
+                          type="button"
+                          disabled={savingVariant}
+                          onClick={() => void selectVariant(detail.cardId, null)}
+                          className={!detail.selectedVariantId ? 'is-active' : ''}
+                        >
+                          使用預設
+                        </button>
+                      </div>
+                      <div className="card-detail-modal__variant-grid">
+                        {detail.variants.map((variant) => (
+                          <button
+                            key={variant.id}
+                            type="button"
+                            disabled={savingVariant}
+                            onClick={() => void selectVariant(detail.cardId, variant.id)}
+                            className={`card-detail-modal__variant-item ${
+                              detail.selectedVariantId === variant.id ? 'is-active' : ''
+                            }`}
+                          >
+                            <img src={variant.imageUrl} alt={`${detail.name} ${variant.variantCode}`} />
+                            <span>{variant.variantName || variant.variantCode}</span>
+                            {variant.isDefault ? <small>Default</small> : null}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
 
                   {detail.oshiSkills.length > 0 ? (
                     <div className="card-detail-modal__block">
@@ -348,6 +441,22 @@ export const CardCatalogPage: FC = () => {
                           </p>
                           <p>{skill.skillName}</p>
                           <p>{skill.description}</p>
+                          {(() => {
+                            const effectChips = getEffectChips(skill.effectJson);
+                            if (effectChips.length === 0) return null;
+                            return (
+                              <div className="card-detail-modal__effect-chip-list">
+                                {effectChips.map((effect, index) => (
+                                  <span
+                                    key={`${skill.skillType}-${skill.skillName}-${effect}`}
+                                    className={`card-detail-modal__effect-chip ${index === 0 ? 'is-primary' : ''}`}
+                                  >
+                                    {effect}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </article>
                       ))}
                     </div>
@@ -358,12 +467,25 @@ export const CardCatalogPage: FC = () => {
                       <h3>アーツ</h3>
                       {detail.memberArts.map((art) => {
                         const costList = parseCheerCost(art.costCheerJson);
+                        const effectChips = getEffectChips(art.effectJson);
                         return (
                           <article key={`${art.orderIndex}-${art.name}`} className="card-detail-modal__item">
                             <p>
                               <strong>#{art.orderIndex}</strong> {art.name}
                             </p>
                             {art.description ? <p>{art.description}</p> : null}
+                            {effectChips.length > 0 ? (
+                              <div className="card-detail-modal__effect-chip-list">
+                                {effectChips.map((effect, index) => (
+                                  <span
+                                    key={`${art.orderIndex}-${art.name}-${effect}`}
+                                    className={`card-detail-modal__effect-chip ${index === 0 ? 'is-primary' : ''}`}
+                                  >
+                                    {effect}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
                             {costList.length > 0 ? (
                               <div className="card-detail-modal__cost-list">
                                 <span className="card-detail-modal__cost-label">費用</span>
@@ -380,6 +502,56 @@ export const CardCatalogPage: FC = () => {
                           </article>
                         );
                       })}
+                    </div>
+                  ) : null}
+
+                  {detail.cardType === 'SUPPORT' ? (
+                    <div className="card-detail-modal__block">
+                      <h3>サポート效果</h3>
+                      <p>LIMITED：{detail.supportLimited ? '是' : '否'}</p>
+                      <p>目標：{detail.supportTargetType || '-'}</p>
+                      {(() => {
+                        const effectChips = getEffectChips(detail.supportEffectJson, detail.supportEffectType);
+                        if (effectChips.length === 0) return null;
+                        return (
+                          <div className="card-detail-modal__effect-chip-list">
+                            {effectChips.map((effect, index) => (
+                              <span
+                                key={`${detail.cardId}-support-effect-${effect}`}
+                                className={`card-detail-modal__effect-chip ${index === 0 ? 'is-primary' : ''}`}
+                              >
+                                {effect}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                      {detail.supportConditionJson ? (
+                        <div className="card-detail-modal__kv-list">
+                          <p>
+                            <strong>條件類型：</strong>
+                            {detail.supportConditionType || '-'}
+                          </p>
+                          {toDisplayEntries(detail.supportConditionJson).map((entry) => (
+                            <p key={`${detail.cardId}-support-condition-${entry.key}`}>
+                              <strong>{entry.key}：</strong>
+                              {entry.value}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                      {detail.supportEffectJson ? (
+                        <div className="card-detail-modal__kv-list">
+                          {toDisplayEntries(detail.supportEffectJson)
+                            .filter((entry) => entry.key !== 'type' && entry.key !== 'effects')
+                            .map((entry) => (
+                              <p key={`${detail.cardId}-support-effect-json-${entry.key}`}>
+                                <strong>{entry.key}：</strong>
+                                {entry.value}
+                              </p>
+                            ))}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 
