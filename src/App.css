@@ -289,6 +289,33 @@ select {
   min-width: 100px;
 }
 
+.deck-validation-box {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(183, 196, 227, 0.35);
+  background: rgba(14, 24, 46, 0.58);
+}
+
+.deck-validation-box--ok {
+  border-color: rgba(77, 201, 155, 0.7);
+}
+
+.deck-validation-box--error {
+  border-color: rgba(255, 143, 162, 0.7);
+}
+
+.deck-validation-box p {
+  margin: 0;
+}
+
+.deck-validation-errors {
+  margin: 8px 0 0;
+}
+
+.deck-validation-errors li {
+  color: #ffd7de;
+}
 
 .button-link {
   display: inline-flex;
@@ -527,6 +554,70 @@ select {
   margin: 0;
   font-size: 0.87rem;
   line-height: 1.35;
+}
+
+.deck-editor-catalog .card-catalog__hero h1 {
+  font-size: 3.2rem;
+}
+
+.deck-editor-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.deck-editor-card__count {
+  margin-top: 6px !important;
+  font-weight: 700;
+}
+
+.deck-editor-card__controls {
+  border-top: 1px solid rgba(95, 88, 153, 0.2);
+  padding: 8px 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.deck-editor-card__detail {
+  width: 100%;
+  padding: 7px 0;
+}
+
+.deck-editor-card__quick {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.deck-editor-card__quick button {
+  padding: 6px 0;
+  border-radius: 6px;
+  border-color: rgba(95, 88, 153, 0.35);
+  background: #ffffff;
+  color: #5b538f;
+}
+
+.deck-editor-card__quick button.is-active {
+  background: #5f56a3;
+  border-color: #5f56a3;
+  color: #ffffff;
+}
+
+.deck-editor-card__stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.deck-editor-card__stepper button {
+  padding: 6px 0;
+  border-radius: 6px;
+}
+
+.deck-editor-card__max {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+  color: #6c67a3;
+  text-align: right;
 }
 
 .card-detail-modal {

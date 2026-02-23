@@ -150,6 +150,35 @@ export interface DeckCard {
   count: number;
 }
 
+export interface DeckSummary {
+  id: number;
+  name: string;
+  format: string;
+  active: boolean;
+  version: number;
+  totalCards: number;
+  distinctCards: number;
+  updatedAt: string;
+}
+
+export interface DeckDetail extends DeckSummary {
+  cards: DeckCard[];
+}
+
+export interface DeckValidationError {
+  code: string;
+  message: string;
+}
+
+export interface DeckValidation {
+  valid: boolean;
+  totalCount: number;
+  oshiCount: number;
+  mainDeckCount: number;
+  cheerDeckCount: number;
+  errors: DeckValidationError[];
+}
+
 export interface PlayerZoneState {
   userId: number;
   oshiCount: number;
@@ -296,6 +325,31 @@ export const createAdminCard = async (payload: AdminCreateCardRequest): Promise<
   return response.data;
 };
 
+export const getMyDeckList = async (): Promise<DeckSummary[]> => {
+  const response = await api.get<DeckSummary[]>('/decks/me/list');
+  return response.data;
+};
+
+export const createMyDeck = async (name: string): Promise<DeckDetail> => {
+  const response = await api.post<DeckDetail>('/decks/me', { name });
+  return response.data;
+};
+
+export const getMyDeckDetail = async (deckId: number): Promise<DeckDetail> => {
+  const response = await api.get<DeckDetail>(`/decks/me/${deckId}`);
+  return response.data;
+};
+
+export const activateMyDeck = async (deckId: number): Promise<DeckDetail> => {
+  const response = await api.post<DeckDetail>(`/decks/me/${deckId}/activate`);
+  return response.data;
+};
+
+export const validateMyDeck = async (deckId: number): Promise<DeckValidation> => {
+  const response = await api.post<DeckValidation>(`/decks/me/${deckId}/validate`);
+  return response.data;
+};
+
 export const getMyDeck = async (): Promise<DeckCard[]> => {
   const response = await api.get<DeckCard[]>('/decks/me');
   return response.data;
@@ -308,6 +362,11 @@ export const setupQuickDeck = async (): Promise<DeckCard[]> => {
 
 export const updateDeckCard = async (cardId: string, count: number): Promise<DeckCard> => {
   const response = await api.put<DeckCard>(`/decks/me/cards/${cardId}`, { count });
+  return response.data;
+};
+
+export const updateDeckCardInDeck = async (deckId: number, cardId: string, count: number): Promise<DeckCard> => {
+  const response = await api.put<DeckCard>(`/decks/me/${deckId}/cards/${cardId}`, { count });
   return response.data;
 };
 
