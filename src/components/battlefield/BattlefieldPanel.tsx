@@ -2,6 +2,7 @@ import type { FC } from 'react';
 import { ZONE_LEGEND, ZONE_META } from '../../types/battlefield';
 import type { GameState, PlayerZoneState } from '../../services/api';
 import { PlayerBattlefield } from './PlayerBattlefield';
+import type { ZoneCardVisualInfo } from './FieldZone';
 
 interface BattlefieldPanelProps {
   showBattlefield: boolean;
@@ -9,15 +10,17 @@ interface BattlefieldPanelProps {
   opponentDisplayName: string;
   currentUserId: number | null;
   gameState: GameState | null;
+  cardInfoById: Record<string, ZoneCardVisualInfo>;
 }
 
-// 對戰場地總面板：上方顯示對手（180 度反轉），下方顯示我方
+// 對戰場地總面板：上方顯示對手（反向布局），下方顯示我方
 export const BattlefieldPanel: FC<BattlefieldPanelProps> = ({
   showBattlefield,
   myDisplayName,
   opponentDisplayName,
   currentUserId,
   gameState,
+  cardInfoById,
 }) => {
   const myState: PlayerZoneState | null = gameState?.players.find((player) => player.userId === currentUserId) ?? null;
   const opponentState: PlayerZoneState | null = gameState?.players.find(
@@ -26,24 +29,30 @@ export const BattlefieldPanel: FC<BattlefieldPanelProps> = ({
 
   return (
     <section className="panel battlefield-panel">
-      <h2>Battle Field (Prototype)</h2>
+      <h2>Battle Field</h2>
       {showBattlefield ? (
         <>
           <div className="battlefield-scroll">
             <div className="battlefield-stack">
-              <PlayerBattlefield playerName={`對手：${opponentDisplayName}`} reversed zoneState={opponentState} />
-              <PlayerBattlefield playerName={`我方：${myDisplayName}`} zoneState={myState} />
+              <PlayerBattlefield
+                playerName={`對手：${opponentDisplayName}`}
+                reversed
+                zoneState={opponentState}
+                cardInfoById={cardInfoById}
+              />
+              <PlayerBattlefield playerName={`我方：${myDisplayName}`} zoneState={myState} cardInfoById={cardInfoById} />
             </div>
           </div>
 
           <p className="battlefield-summary">
-            場地快照：Turn #{gameState?.turnNumber ?? '-'} / 目前行動玩家 #{gameState?.currentTurnPlayerId ?? '-'}
+            場地快照：Turn #{gameState?.turnNumber ?? '-'} / Phase {gameState?.phase ?? '-'} / 目前行動玩家 #
+            {gameState?.currentTurnPlayerId ?? '-'}
           </p>
 
           <ul className="zone-legend">
             {ZONE_LEGEND.map((zoneId) => (
               <li key={zoneId}>
-                <strong>{zoneId}.</strong> {ZONE_META[zoneId].title} - {ZONE_META[zoneId].subtitle}
+                <strong>{zoneId}.</strong> {ZONE_META[zoneId].title}
               </li>
             ))}
           </ul>

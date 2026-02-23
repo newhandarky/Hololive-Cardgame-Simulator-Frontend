@@ -9,8 +9,12 @@ import { CardCatalogPage } from './pages/CardCatalogPage';
 import { DeckEditorPage } from './pages/DeckEditorPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import {
+  activateMyDeck,
+  attachCheer,
+  attackArt,
   createMatch,
   endTurn,
+  getMyDeckList,
   getMatch,
   getMatchState,
   getMatchWsUrl,
@@ -18,14 +22,21 @@ import {
   healthCheck,
   joinMatch,
   loginWithLine,
+  playSupport,
+  playToStage,
   setMatchReady,
   setupQuickDeck,
   startMatch,
+  type AttachCheerActionRequest,
+  type AttackArtActionRequest,
   type ApiUser,
+  type DeckSummary,
   type GameState,
   type LobbyEvent,
   type LobbyMatch,
   type LobbyPlayer,
+  type PlaySupportActionRequest,
+  type PlayToStageActionRequest,
 } from './services/api';
 
 const MOCK_ID_STORAGE_KEY = 'mockLineId';
@@ -53,6 +64,10 @@ interface GameRoomRouteProps {
   opponentDisplayName: string;
   currentUserId: number | null;
   busy: boolean;
+  onPlayToStage: (payload: PlayToStageActionRequest) => Promise<void>;
+  onPlaySupport: (payload: PlaySupportActionRequest) => Promise<void>;
+  onAttachCheer: (payload: AttachCheerActionRequest) => Promise<void>;
+  onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onBackToLobby: () => void;
 }
@@ -66,6 +81,10 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
   opponentDisplayName,
   currentUserId,
   busy,
+  onPlayToStage,
+  onPlaySupport,
+  onAttachCheer,
+  onAttackArt,
   onEndTurn,
   onBackToLobby,
 }) => {
@@ -105,6 +124,10 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
       opponentDisplayName={opponentDisplayName}
       currentUserId={currentUserId}
       busy={busy}
+      onPlayToStage={onPlayToStage}
+      onPlaySupport={onPlaySupport}
+      onAttachCheer={onAttachCheer}
+      onAttackArt={onAttackArt}
       onEndTurn={onEndTurn}
       onBackToLobby={onBackToLobby}
     />
@@ -120,6 +143,8 @@ const App: FC = () => {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [myDecks, setMyDecks] = useState<DeckSummary[]>([]);
+  const [loadingDecks, setLoadingDecks] = useState(false);
 
   const [mockLineId, setMockLineId] = useState(getInitialMockLineId);
   const [roomCodeInput, setRoomCodeInput] = useState('');
@@ -150,6 +175,7 @@ const App: FC = () => {
     if (!currentMatch || currentUserId == null || currentMatch.players.length === 0) return false;
     return currentMatch.players[0].userId === currentUserId;
   }, [currentMatch, currentUserId]);
+  const activeDeck = useMemo(() => myDecks.find((deck) => deck.active) ?? null, [myDecks]);
 
   const myDisplayName = useMemo(() => {
     if (currentUserId == null) return '我方玩家';
@@ -234,13 +260,27 @@ const App: FC = () => {
     }
   };
 
+  const loadMyDecks = async () => {
+    setLoadingDecks(true);
+    setError(null);
+    try {
+      const decks = await withReauth(() => getMyDeckList());
+      setMyDecks(decks);
+    } catch (err) {
+      setError(getApiErrorMessage(err, '載入牌組清單失敗'));
+      console.error(err);
+    } finally {
+      setLoadingDecks(false);
+    }
+  };
+
   // 讀取指定房間的場地快照，供 GameRoom 直接渲染
   const loadGameState = async (matchId: number) => {
     const snapshot = await withReauth(() => getMatchState(matchId));
     setCurrentGameState(snapshot);
   };
 
-  // 初始流程：健康檢查 -> mock 登入 -> 載入使用者清單
+  // 初始流程：健康檢查 -> mock 登入 -> 載入使用者清單與牌組清單
   useEffect(() => {
     const init = async () => {
       try {
@@ -259,7 +299,7 @@ const App: FC = () => {
         console.error(err);
       }
 
-      await loadUsers();
+      await Promise.all([loadUsers(), loadMyDecks()]);
     };
 
     void init();
@@ -374,7 +414,7 @@ const App: FC = () => {
       setCurrentMatch(null);
       setCurrentGameState(null);
       navigate('/lobby', { replace: true });
-      await loadUsers();
+      await Promise.all([loadUsers(), loadMyDecks()]);
     } catch (err) {
       setError('Failed to sign in with this mock user id.');
       console.error(err);
@@ -405,8 +445,23 @@ const App: FC = () => {
     setError(null);
     try {
       await withReauth(() => setupQuickDeck());
+      await loadMyDecks();
     } catch (err) {
       setError(getApiErrorMessage(err, '補齊測試牌組失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSelectDeck = async (deckId: number) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await withReauth(() => activateMyDeck(deckId));
+      await loadMyDecks();
+    } catch (err) {
+      setError(getApiErrorMessage(err, '切換牌組失敗'));
       console.error(err);
     } finally {
       setBusy(false);
@@ -489,6 +544,82 @@ const App: FC = () => {
     }
   };
 
+  const handlePlayToStage = async (payload: PlayToStageActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => playToStage(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'PLAY_TO_STAGE 失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePlaySupport = async (payload: PlaySupportActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => playSupport(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'PLAY_SUPPORT 失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAttachCheer = async (payload: AttachCheerActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => attachCheer(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'ATTACH_CHEER 失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAttackArt = async (payload: AttackArtActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => attackArt(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'ATTACK_ART 失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="app">
       <Routes>
@@ -504,7 +635,10 @@ const App: FC = () => {
               busy={busy}
               wsStatus={wsStatus}
               loadingUsers={loadingUsers}
+              loadingDecks={loadingDecks}
               users={users}
+              decks={myDecks}
+              activeDeckId={activeDeck?.id ?? null}
               currentMatch={currentMatch}
               myPlayer={myPlayer}
               isHost={isHost}
@@ -516,6 +650,7 @@ const App: FC = () => {
               onJoinRoom={handleJoinRoom}
               onToggleReady={handleToggleReady}
               onStartMatch={handleStart}
+              onSelectDeck={handleSelectDeck}
             />
           }
         />
@@ -530,6 +665,10 @@ const App: FC = () => {
               opponentDisplayName={opponentDisplayName}
               currentUserId={currentUserId}
               busy={busy}
+              onPlayToStage={handlePlayToStage}
+              onPlaySupport={handlePlaySupport}
+              onAttachCheer={handleAttachCheer}
+              onAttackArt={handleAttackArt}
               onEndTurn={handleEndTurn}
               onBackToLobby={() => navigate('/lobby', { replace: true })}
             />

@@ -21,3 +21,15 @@ export const ZONE_META: Record<ZoneId, ZoneMeta> = {
   8: { title: 'エールデッキ', subtitle: 'Yell Deck' },
   9: { title: 'ライフ', subtitle: 'Life' },
 };
+
+export const BOARD_SLOT_TO_ZONE: Record<ZoneId, string> = {
+  1: 'OSHI',
+  2: 'CENTER',
+  3: 'COLLAB',
+  4: 'BACK',
+  5: 'DECK',
+  6: 'ARCHIVE',
+  7: 'HOLOPOWER',
+  8: 'CHEER_DECK',
+  9: 'LIFE',
+};

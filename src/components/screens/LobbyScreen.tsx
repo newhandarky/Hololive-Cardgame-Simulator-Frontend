@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { Link } from 'react-router-dom';
-import type { ApiUser, LobbyMatch, LobbyPlayer } from '../../services/api';
+import type { ApiUser, DeckSummary, LobbyMatch, LobbyPlayer } from '../../services/api';
 
 interface LobbyScreenProps {
   health: string;
@@ -10,7 +10,10 @@ interface LobbyScreenProps {
   busy: boolean;
   wsStatus: string;
   loadingUsers: boolean;
+  loadingDecks: boolean;
   users: ApiUser[];
+  decks: DeckSummary[];
+  activeDeckId: number | null;
   currentMatch: LobbyMatch | null;
   myPlayer: LobbyPlayer | null;
   isHost: boolean;
@@ -22,6 +25,7 @@ interface LobbyScreenProps {
   onJoinRoom: () => Promise<void>;
   onToggleReady: () => Promise<void>;
   onStartMatch: () => Promise<void>;
+  onSelectDeck: (deckId: number) => Promise<void>;
 }
 
 // Lobby 主畫面：顯示玩家資訊、建立房間與加入房間流程
@@ -33,7 +37,10 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
   busy,
   wsStatus,
   loadingUsers,
+  loadingDecks,
   users,
+  decks,
+  activeDeckId,
   currentMatch,
   myPlayer,
   isHost,
@@ -45,6 +52,7 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
   onJoinRoom,
   onToggleReady,
   onStartMatch,
+  onSelectDeck,
 }) => {
   return (
     <>
@@ -76,6 +84,36 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
             卡片管理頁
           </Link>
         </div>
+      </section>
+
+      <section className="panel">
+        <h2>對戰牌組</h2>
+        <div className="row">
+          <select
+            value={activeDeckId ?? ''}
+            onChange={(event) => {
+              if (!event.target.value) {
+                return;
+              }
+              void onSelectDeck(Number(event.target.value));
+            }}
+            disabled={busy || loadingDecks || decks.length === 0}
+          >
+            {decks.length === 0 ? <option value="">目前沒有牌組</option> : null}
+            {decks.map((deck) => (
+              <option key={deck.id} value={deck.id}>
+                {deck.name}（{deck.totalCards} 張{deck.active ? ' / 啟用中' : ''}）
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className="lobby-deck-hint">
+          {loadingDecks
+            ? '牌組載入中...'
+            : activeDeckId != null
+              ? `目前啟用牌組 ID：${activeDeckId}`
+              : '尚未設定可用牌組，請先到「編輯卡牌頁」建立或使用一鍵補測試牌組。'}
+        </p>
       </section>
 
       <section className="panel">
@@ -112,17 +150,18 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
             </ul>
 
             <div className="row">
-              <button type="button" onClick={() => void onToggleReady()} disabled={busy || !myPlayer}>
+              <button type="button" onClick={() => void onToggleReady()} disabled={busy || !myPlayer || activeDeckId == null}>
                 {myPlayer?.ready ? 'Set Not Ready' : 'Set Ready'}
               </button>
               <button
                 type="button"
                 onClick={() => void onStartMatch()}
-                disabled={busy || !isHost || currentMatch.status !== 'READY'}
+                disabled={busy || !isHost || currentMatch.status !== 'READY' || activeDeckId == null}
               >
                 Start Match
               </button>
             </div>
+            {activeDeckId == null ? <p className="lobby-deck-hint">請先在上方選擇可用牌組，才能準備與開始對戰。</p> : null}
           </>
         ) : (
           <p>No room joined.</p>

@@ -191,15 +191,56 @@ export interface PlayerZoneState {
   cheerDeckCount: number;
   lifeCount: number;
   handCount: number;
+  boardZones: BoardZoneState[];
+  handCards: ZoneCardInstance[];
+}
+
+export type MatchPhase = 'RESET' | 'MAIN' | 'PERFORMANCE' | 'END';
+
+export interface ZoneCardInstance {
+  cardInstanceId: number;
+  cardId: string;
+  zone: string;
+  positionIndex: number;
+  ownerUserId: number;
+  faceDown: boolean;
+}
+
+export interface BoardZoneState {
+  slotIndex: number;
+  zone: string;
+  cards: ZoneCardInstance[];
 }
 
 export interface GameState {
   matchId: number;
   roomCode: string;
   status: 'WAITING' | 'READY' | 'STARTED';
+  phase: MatchPhase;
   currentTurnPlayerId: number | null;
   turnNumber: number;
   players: PlayerZoneState[];
+}
+
+export interface PlayToStageActionRequest {
+  cardInstanceId: number;
+  targetZone: 'CENTER' | 'BACK';
+}
+
+export interface PlaySupportActionRequest {
+  cardInstanceId: number;
+  targetHolomemCardInstanceId?: number | null;
+  selectedCardInstanceIds?: number[];
+}
+
+export interface AttachCheerActionRequest {
+  cheerCardInstanceId: number;
+  targetHolomemCardInstanceId: number;
+}
+
+export interface AttackArtActionRequest {
+  attackerCardInstanceId: number;
+  targetCardInstanceId?: number | null;
 }
 
 export interface AdminCreateCardRequest {
@@ -287,6 +328,26 @@ export const setMatchReady = async (matchId: number, ready: boolean): Promise<Lo
 
 export const startMatch = async (matchId: number): Promise<LobbyMatch> => {
   const response = await api.post<LobbyMatch>(`/matches/${matchId}/start`);
+  return response.data;
+};
+
+export const playToStage = async (matchId: number, payload: PlayToStageActionRequest): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/play-to-stage`, payload);
+  return response.data;
+};
+
+export const playSupport = async (matchId: number, payload: PlaySupportActionRequest): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/play-support`, payload);
+  return response.data;
+};
+
+export const attachCheer = async (matchId: number, payload: AttachCheerActionRequest): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/attach-cheer`, payload);
+  return response.data;
+};
+
+export const attackArt = async (matchId: number, payload: AttackArtActionRequest): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/attack-art`, payload);
   return response.data;
 };
 
