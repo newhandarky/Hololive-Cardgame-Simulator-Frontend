@@ -1005,6 +1005,11 @@ select {
   color: #c8d7f5;
 }
 
+.battle-ops-panel__hint {
+  margin: 10px 0 0;
+  color: #ffe7a1;
+}
+
 .hand-card {
   min-width: 120px;
   border-radius: 10px;
@@ -1052,6 +1057,96 @@ select {
   gap: 6px;
   font-size: 0.86rem;
   color: #d8e6ff;
+}
+
+.battle-decision-panel {
+  margin-top: 12px;
+}
+
+.battle-decision-panel h2 {
+  margin: 0;
+}
+
+.battle-decision-panel p {
+  margin: 8px 0 0;
+  color: #d3e2ff;
+}
+
+.battle-decision-panel__candidates {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.battle-decision-card {
+  min-width: 120px;
+  border-radius: 10px;
+  border: 1px solid rgba(183, 196, 227, 0.35);
+  background: rgba(13, 22, 40, 0.75);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.battle-decision-card.is-selected {
+  border-color: #ffe48a;
+  box-shadow: 0 0 0 2px rgba(255, 228, 138, 0.3);
+}
+
+.battle-decision-panel__actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.battle-log-panel {
+  margin-top: 12px;
+}
+
+.battle-log-panel h2 {
+  margin: 0;
+}
+
+.battle-log-panel__empty {
+  margin: 10px 0 0;
+  color: #c8d7f5;
+}
+
+.battle-log-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.battle-log-item {
+  border: 1px solid rgba(183, 196, 227, 0.28);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(13, 22, 40, 0.58);
+}
+
+.battle-log-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.battle-log-item__header span {
+  color: #c6d8ff;
+  font-size: 0.8rem;
+}
+
+.battle-log-item__detail {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
 }
 
 /* Confirm action modal */

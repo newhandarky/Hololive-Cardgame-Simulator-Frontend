@@ -212,6 +212,39 @@ export interface BoardZoneState {
   cards: ZoneCardInstance[];
 }
 
+export interface RecentMatchAction {
+  actionId: number;
+  userId: number;
+  actionType: string;
+  turnNumber: number;
+  actionOrder: number;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface PendingDecisionCandidate {
+  cardInstanceId: number;
+  cardId: string;
+  name?: string;
+  cardType?: string;
+  levelType?: string;
+  zone?: string;
+}
+
+export interface PendingDecision {
+  decisionId: number;
+  decisionType: string;
+  sourceActionType: string;
+  sourceCardInstanceId: number;
+  sourceCardId: string;
+  effectType: string;
+  minSelect: number;
+  maxSelect: number;
+  targetHolomemCardInstanceId?: number | null;
+  createdAt: string;
+  candidates: PendingDecisionCandidate[];
+}
+
 export interface GameState {
   matchId: number;
   roomCode: string;
@@ -220,6 +253,8 @@ export interface GameState {
   currentTurnPlayerId: number | null;
   turnNumber: number;
   players: PlayerZoneState[];
+  recentActions: RecentMatchAction[];
+  pendingDecisions: PendingDecision[];
 }
 
 export interface PlayToStageActionRequest {
@@ -241,6 +276,11 @@ export interface AttachCheerActionRequest {
 export interface AttackArtActionRequest {
   attackerCardInstanceId: number;
   targetCardInstanceId?: number | null;
+}
+
+export interface ResolveDecisionActionRequest {
+  decisionId: number;
+  selectedCardInstanceIds: number[];
 }
 
 export interface AdminCreateCardRequest {
@@ -353,6 +393,14 @@ export const attackArt = async (matchId: number, payload: AttackArtActionRequest
 
 export const endTurn = async (matchId: number): Promise<LobbyMatch> => {
   const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/end-turn`);
+  return response.data;
+};
+
+export const resolveDecision = async (
+  matchId: number,
+  payload: ResolveDecisionActionRequest,
+): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/resolve-decision`, payload);
   return response.data;
 };
 

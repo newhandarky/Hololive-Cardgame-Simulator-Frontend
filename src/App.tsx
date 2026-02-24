@@ -24,6 +24,7 @@ import {
   loginWithLine,
   playSupport,
   playToStage,
+  resolveDecision,
   setMatchReady,
   setupQuickDeck,
   startMatch,
@@ -37,6 +38,7 @@ import {
   type LobbyPlayer,
   type PlaySupportActionRequest,
   type PlayToStageActionRequest,
+  type ResolveDecisionActionRequest,
 } from './services/api';
 
 const MOCK_ID_STORAGE_KEY = 'mockLineId';
@@ -68,6 +70,7 @@ interface GameRoomRouteProps {
   onPlaySupport: (payload: PlaySupportActionRequest) => Promise<void>;
   onAttachCheer: (payload: AttachCheerActionRequest) => Promise<void>;
   onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
+  onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onBackToLobby: () => void;
 }
@@ -85,6 +88,7 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
   onPlaySupport,
   onAttachCheer,
   onAttackArt,
+  onResolveDecision,
   onEndTurn,
   onBackToLobby,
 }) => {
@@ -128,6 +132,7 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
       onPlaySupport={onPlaySupport}
       onAttachCheer={onAttachCheer}
       onAttackArt={onAttackArt}
+      onResolveDecision={onResolveDecision}
       onEndTurn={onEndTurn}
       onBackToLobby={onBackToLobby}
     />
@@ -620,6 +625,25 @@ const App: FC = () => {
     }
   };
 
+  const handleResolveDecision = async (payload: ResolveDecisionActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => resolveDecision(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, '決策結算失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="app">
       <Routes>
@@ -669,6 +693,7 @@ const App: FC = () => {
               onPlaySupport={handlePlaySupport}
               onAttachCheer={handleAttachCheer}
               onAttackArt={handleAttackArt}
+              onResolveDecision={handleResolveDecision}
               onEndTurn={handleEndTurn}
               onBackToLobby={() => navigate('/lobby', { replace: true })}
             />

@@ -6,7 +6,10 @@ import type {
   AttackArtActionRequest,
   GameState,
   LobbyMatch,
+  PendingDecision,
+  RecentMatchAction,
   PlayToStageActionRequest,
+  ResolveDecisionActionRequest,
   ZoneCardInstance,
 } from '../../services/api';
 import type { ZoneCardVisualInfo } from '../battlefield/FieldZone';
@@ -23,6 +26,7 @@ interface GameRoomScreenProps {
   onPlaySupport: (payload: PlaySupportActionRequest) => Promise<void>;
   onAttachCheer: (payload: AttachCheerActionRequest) => Promise<void>;
   onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
+  onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onBackToLobby: () => void;
 }
@@ -40,6 +44,52 @@ interface CardVisualExt extends ZoneCardVisualInfo {
   cardType: string;
 }
 
+interface BloomActionSummary {
+  diceRoll: number | null;
+  requestedEffects: string[];
+  executedEffects: string[];
+  unsupportedEffects: string[];
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+};
+
+const asNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const asStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter((item) => item.length > 0);
+};
+
+const asEffectTypeList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      const itemRecord = asRecord(item);
+      return typeof itemRecord?.effectType === 'string' ? itemRecord.effectType.trim() : '';
+    })
+    .filter((item) => item.length > 0);
+};
+
 // GameRoom 畫面：進入對戰後聚焦場地與視覺化操作
 export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   currentMatch,
@@ -53,6 +103,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   onPlaySupport,
   onAttachCheer,
   onAttackArt,
+  onResolveDecision,
   onEndTurn,
   onBackToLobby,
 }) => {
@@ -87,6 +138,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       .flatMap((zone) => zone.cards);
   }, [opponentBoardZones]);
 
+  const pendingDecisions = currentGameState?.pendingDecisions ?? [];
+  const activePendingDecision: PendingDecision | null = pendingDecisions[0] ?? null;
+
   const allKnownCards = useMemo(() => {
     return [
       ...myHandCards,
@@ -96,8 +150,15 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   }, [myHandCards, myBoardZones, opponentBoardZones]);
 
   const uniqueCardIds = useMemo(() => {
-    return Array.from(new Set(allKnownCards.map((card) => card.cardId).filter((cardId) => Boolean(cardId))));
-  }, [allKnownCards]);
+    const cardIds = allKnownCards
+      .map((card) => card.cardId)
+      .filter((cardId): cardId is string => Boolean(cardId));
+    const pendingCardIds = pendingDecisions
+      .flatMap((decision) => decision.candidates)
+      .map((candidate) => candidate.cardId)
+      .filter((cardId): cardId is string => Boolean(cardId));
+    return Array.from(new Set([...cardIds, ...pendingCardIds]));
+  }, [allKnownCards, pendingDecisions]);
 
   const [cardInfoById, setCardInfoById] = useState<Record<string, CardVisualExt>>({});
   const loadingCardIdsRef = useRef<Set<string>>(new Set());
@@ -167,6 +228,11 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const [attackerCardInstanceId, setAttackerCardInstanceId] = useState<number | null>(null);
   const [attackTargetCardInstanceId, setAttackTargetCardInstanceId] = useState<number | null>(null);
   const [pendingHandAction, setPendingHandAction] = useState<HandActionDraft | null>(null);
+  const [selectedDecisionCardInstanceIds, setSelectedDecisionCardInstanceIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    setSelectedDecisionCardInstanceIds([]);
+  }, [activePendingDecision?.decisionId]);
 
   useEffect(() => {
     if (!myCenterHolomems.some((card) => card.cardInstanceId === attackerCardInstanceId)) {
@@ -180,7 +246,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     }
   }, [attackTargetCardInstanceId, opponentTargets]);
 
-  const canSubmitAction = !busy && isMyTurn && currentGameState?.status === 'STARTED';
+  const canSubmitAction = !busy && isMyTurn && currentGameState?.status === 'STARTED' && !activePendingDecision;
 
   const cardName = (card: ZoneCardInstance): string => {
     return cardInfoById[card.cardId]?.name ?? '卡片';
@@ -302,6 +368,54 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     canSubmitAction &&
     (pendingHandAction.kind !== 'ATTACH_CHEER' || pendingHandAction.targetHolomemCardInstanceId != null);
 
+  const recentActions = currentGameState?.recentActions ?? [];
+
+  const toggleDecisionSelection = (cardInstanceId: number) => {
+    if (!activePendingDecision || busy) {
+      return;
+    }
+    setSelectedDecisionCardInstanceIds((previous) => {
+      const exists = previous.includes(cardInstanceId);
+      if (exists) {
+        return previous.filter((value) => value !== cardInstanceId);
+      }
+      if (previous.length >= activePendingDecision.maxSelect) {
+        return previous;
+      }
+      return [...previous, cardInstanceId];
+    });
+  };
+
+  const canResolveDecision =
+    !!activePendingDecision &&
+    !busy &&
+    selectedDecisionCardInstanceIds.length >= Math.max(activePendingDecision.minSelect, 1) &&
+    selectedDecisionCardInstanceIds.length <= activePendingDecision.maxSelect;
+
+  const actionActorLabel = (action: RecentMatchAction): string => {
+    if (currentUserId == null) {
+      return `玩家 #${action.userId}`;
+    }
+    return action.userId === currentUserId ? '我方' : '對手';
+  };
+
+  const resolveBloomSummary = (action: RecentMatchAction): BloomActionSummary | null => {
+    if (action.actionType !== 'BLOOM') {
+      return null;
+    }
+    const payload = asRecord(action.payload);
+    const bloomEffect = asRecord(payload?.bloomEffect);
+    if (!bloomEffect) {
+      return null;
+    }
+    return {
+      diceRoll: asNumber(bloomEffect.diceRoll),
+      requestedEffects: asStringList(bloomEffect.requestedEffects),
+      executedEffects: asEffectTypeList(bloomEffect.executedEffects),
+      unsupportedEffects: asStringList(bloomEffect.unsupportedEffects),
+    };
+  };
+
   return (
     <>
       <div className="screen-header">
@@ -339,6 +453,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
 
       <section className="panel battle-ops-panel">
         <h2>手牌與操作</h2>
+        {activePendingDecision ? (
+          <p className="battle-ops-panel__hint">目前有待處理效果，請先完成下方「效果選擇」。</p>
+        ) : null}
 
         <div className="hand-rack">
           {myHandCards.length === 0 ? <p className="hand-rack__empty">目前沒有手牌。</p> : null}
@@ -423,6 +540,99 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
             </button>
           </div>
         </div>
+      </section>
+
+      {activePendingDecision ? (
+        <section className="panel battle-decision-panel">
+          <h2>效果選擇</h2>
+          <p>
+            類型：{activePendingDecision.effectType} / 請選擇 {activePendingDecision.minSelect} ~{' '}
+            {activePendingDecision.maxSelect} 張
+          </p>
+          <div className="battle-decision-panel__candidates">
+            {activePendingDecision.candidates.map((candidate) => {
+              const selected = selectedDecisionCardInstanceIds.includes(candidate.cardInstanceId);
+              const info = cardInfoById[candidate.cardId];
+              return (
+                <button
+                  key={candidate.cardInstanceId}
+                  type="button"
+                  className={`battle-decision-card${selected ? ' is-selected' : ''}`}
+                  onClick={() => toggleDecisionSelection(candidate.cardInstanceId)}
+                >
+                  {info?.imageUrl ? (
+                    <img
+                      className="card-visual card-visual--front"
+                      src={info.imageUrl}
+                      alt={info.name ?? candidate.name ?? candidate.cardId}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="card-visual card-visual--placeholder">
+                      <span>{candidate.name ?? candidate.cardId}</span>
+                    </div>
+                  )}
+                  <span className="hand-card__name">{candidate.name ?? info?.name ?? candidate.cardId}</span>
+                  <span className="hand-card__meta">#{candidate.cardInstanceId}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="battle-decision-panel__actions">
+            <button
+              type="button"
+              disabled={!canResolveDecision}
+              onClick={() =>
+                void onResolveDecision({
+                  decisionId: activePendingDecision.decisionId,
+                  selectedCardInstanceIds: selectedDecisionCardInstanceIds,
+                })
+              }
+            >
+              確認結算效果
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="panel battle-log-panel">
+        <h2>最近行動</h2>
+        {recentActions.length === 0 ? (
+          <p className="battle-log-panel__empty">尚無行動紀錄。</p>
+        ) : (
+          <ul className="battle-log-list">
+            {recentActions.map((action) => {
+              const bloomSummary = resolveBloomSummary(action);
+              return (
+                <li key={action.actionId} className="battle-log-item">
+                  <div className="battle-log-item__header">
+                    <strong>{action.actionType}</strong>
+                    <span>
+                      T{action.turnNumber}-{action.actionOrder} {actionActorLabel(action)}
+                    </span>
+                  </div>
+
+                  {bloomSummary ? (
+                    <div className="battle-log-item__detail">
+                      {bloomSummary.diceRoll != null ? <p>骰值：{bloomSummary.diceRoll}</p> : null}
+                      <p>
+                        請求效果：
+                        {bloomSummary.requestedEffects.length > 0 ? bloomSummary.requestedEffects.join(', ') : '無'}
+                      </p>
+                      <p>
+                        實際執行：
+                        {bloomSummary.executedEffects.length > 0 ? bloomSummary.executedEffects.join(', ') : '無'}
+                      </p>
+                      {bloomSummary.unsupportedEffects.length > 0 ? (
+                        <p>未支援：{bloomSummary.unsupportedEffects.join(', ')}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       {pendingHandAction ? (
