@@ -9,7 +9,6 @@ import type {
   LobbyMatch,
   MoveStageHolomemActionRequest,
   PendingDecision,
-  PendingDecisionCandidate,
   PendingInteraction,
   RecentMatchAction,
   PlayToStageActionRequest,
@@ -36,6 +35,8 @@ interface GameRoomScreenProps {
   onMoveStageHolomem: (payload: MoveStageHolomemActionRequest) => Promise<void>;
   onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
+  onConcede: () => Promise<void>;
+  errorMessage: string | null;
   onBackToLobby: () => void;
 }
 
@@ -67,6 +68,33 @@ interface BloomActionSummary {
   requestedEffects: string[];
   executedEffects: string[];
   unsupportedEffects: string[];
+}
+
+interface TargetCandidateCard {
+  cardInstanceId: number;
+  cardId: string;
+  name?: string;
+  imageUrl?: string | null;
+  zone?: string | null;
+  currentHp?: number | null;
+  maxHp?: number | null;
+  damageTaken?: number | null;
+  cheerCount?: number | null;
+  cheerColorCounts?: Record<string, number> | null;
+  attachedSupportCount?: number | null;
+}
+
+interface BloomTargetOption {
+  target: ZoneCardInstance;
+  selectable: boolean;
+  reason?: string;
+}
+
+interface HandActionAvailability {
+  kind: HandActionKind | null;
+  selectable: boolean;
+  reason?: string;
+  bloomOptions?: BloomTargetOption[];
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
@@ -242,7 +270,7 @@ const resolveCheerColorLabel = (color: string): string => {
   }
 };
 
-const resolveCandidateMetaLines = (candidate: PendingDecisionCandidate): string[] => {
+const resolveCandidateMetaLines = (candidate: TargetCandidateCard): string[] => {
   const lines: string[] = [];
   if (candidate.maxHp != null) {
     const resolvedCurrentHp =
@@ -261,6 +289,7 @@ const resolveCandidateMetaLines = (candidate: PendingDecisionCandidate): string[
   } else if ((candidate.cheerCount ?? 0) > 0) {
     lines.push(`エール *${candidate.cheerCount}`);
   }
+  lines.push(`裝備/支援 *${candidate.attachedSupportCount ?? 0}`);
   return lines;
 };
 
@@ -309,6 +338,8 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   onMoveStageHolomem,
   onResolveDecision,
   onEndTurn,
+  onConcede,
+  errorMessage,
   onBackToLobby,
 }) => {
   const isMyTurn = currentUserId != null && currentMatch.currentTurnPlayerId === currentUserId;
@@ -443,8 +474,11 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const [pendingHandAction, setPendingHandAction] = useState<HandActionDraft | null>(null);
   const [pendingStageMove, setPendingStageMove] = useState<StageMoveDraft | null>(null);
   const [infoModalMessage, setInfoModalMessage] = useState<string | null>(null);
+  const [showConcedeConfirm, setShowConcedeConfirm] = useState(false);
+  const lastExternalErrorRef = useRef<string | null>(null);
   const [selectedDecisionCardInstanceIds, setSelectedDecisionCardInstanceIds] = useState<number[]>([]);
   const [selectedInteractionCardInstanceIds, setSelectedInteractionCardInstanceIds] = useState<number[]>([]);
+  const [selectedInteractionPlacement, setSelectedInteractionPlacement] = useState<'TOP' | 'BOTTOM' | null>(null);
 
   useEffect(() => {
     setSelectedDecisionCardInstanceIds([]);
@@ -452,6 +486,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
 
   useEffect(() => {
     setSelectedInteractionCardInstanceIds([]);
+    setSelectedInteractionPlacement(null);
   }, [activePendingInteraction?.interactionId]);
 
   useEffect(() => {
@@ -479,6 +514,10 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     return myBoardZones.find((zone) => zone.zone === 'COLLAB')?.cards ?? [];
   }, [myBoardZones]);
 
+  const myBackHolomems = useMemo(() => {
+    return myBoardZones.find((zone) => zone.zone === 'BACK')?.cards ?? [];
+  }, [myBoardZones]);
+
   const myTurnActions = useMemo(() => {
     if (currentUserId == null || !currentGameState?.turnNumber) {
       return [];
@@ -492,6 +531,25 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     () => myTurnActions.some((action) => action.actionType === 'TURN_CHEER'),
     [myTurnActions],
   );
+
+  const resolveGlobalActionBlockReason = (): string | null => {
+    if (busy) {
+      return '操作進行中，請稍候。';
+    }
+    if (!isMyTurn) {
+      return '目前不是你的回合。';
+    }
+    if (currentGameState?.status !== 'STARTED') {
+      return '對戰尚未開始或已結束。';
+    }
+    if (activePendingDecision) {
+      return '目前有待處理效果，請先完成「效果選擇」。';
+    }
+    if (activePendingInteraction) {
+      return '目前有待確認互動，請先完成彈窗確認。';
+    }
+    return null;
+  };
 
   const cardName = (card: ZoneCardInstance): string => {
     return cardInfoById[card.cardId]?.name ?? '卡片';
@@ -520,10 +578,10 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     const type = cardType(card);
     if (type === 'MEMBER') {
       const level = (cardInfoById[card.cardId]?.levelType ?? '').toUpperCase();
-      if (level === 'FIRST' || level === 'SECOND') {
+      if (level === 'FIRST' || level === 'SECOND' || level === 'BUZZ') {
         return 'BLOOM';
       }
-      if (level === 'DEBUT' || level === 'SPOT' || level === 'BUZZ') {
+      if (level === 'DEBUT' || level === 'SPOT') {
         return 'PLAY_TO_STAGE';
       }
       return null;
@@ -537,49 +595,118 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     return null;
   };
 
-  const resolveBloomTargets = (bloomCard: ZoneCardInstance): ZoneCardInstance[] => {
+  const resolveBloomTargetOptions = (bloomCard: ZoneCardInstance): BloomTargetOption[] => {
     const bloomInfo = cardInfoById[bloomCard.cardId];
     const bloomName = (bloomInfo?.name ?? '').trim();
-    const bloomLevel = bloomInfo?.levelType;
-    if (!bloomName || !bloomLevel) {
-      return [];
-    }
+    const bloomLevel = (bloomInfo?.levelType ?? '').toUpperCase();
     const bloomRank = levelRank(bloomLevel);
-    if (bloomRank <= 0) {
-      return [];
-    }
-    return myHolomems.filter((target) => {
+
+    return myHolomems.map((target) => {
       const targetInfo = cardInfoById[target.cardId];
       const targetName = (targetInfo?.name ?? '').trim();
-      const targetLevel = targetInfo?.levelType;
-      if (!targetName || !targetLevel) {
-        return false;
+      const targetLevel = (targetInfo?.levelType ?? '').toUpperCase();
+      const targetRank = levelRank(targetLevel);
+
+      let reason: string | undefined;
+      if (!bloomName || !bloomLevel || bloomRank <= 0) {
+        reason = '此卡沒有可用的 BLOOM 等級資訊';
+      } else if (!targetName || !targetLevel || targetRank < 0) {
+        reason = '目標缺少可判定的等級資訊';
+      } else if (targetLevel === 'SPOT') {
+        reason = 'Spot Holomem 不能作為 BLOOM 目標';
+      } else if (targetName !== bloomName) {
+        reason = '名稱不同，不能 BLOOM';
+      } else if (targetRank + 1 !== bloomRank) {
+        reason = '等級不符，必須依序遞進 BLOOM';
       }
-      return targetName === bloomName && levelRank(targetLevel) >= 0 && levelRank(targetLevel) < bloomRank;
+
+      return {
+        target,
+        selectable: !reason,
+        reason,
+      };
     });
   };
 
+  const resolveHandActionAvailability = (card: ZoneCardInstance): HandActionAvailability => {
+    const kind = resolveDefaultHandAction(card);
+    if (!kind) {
+      return {
+        kind: null,
+        selectable: false,
+        reason: '此卡目前沒有可用操作。',
+      };
+    }
+
+    const blockedReason = resolveGlobalActionBlockReason();
+    if (blockedReason) {
+      return { kind, selectable: false, reason: blockedReason };
+    }
+
+    if (kind === 'PLAY_TO_STAGE') {
+      if (myBackHolomems.length >= 5) {
+        return { kind, selectable: false, reason: 'BACK 已滿（最多 5 張），無法再放置。' };
+      }
+      return { kind, selectable: true };
+    }
+
+    if (kind === 'ATTACH_CHEER') {
+      if (myHolomems.length === 0) {
+        return { kind, selectable: false, reason: '場上沒有可附加的 Holomem。' };
+      }
+      return { kind, selectable: true };
+    }
+
+    if (kind === 'BLOOM') {
+      const bloomOptions = resolveBloomTargetOptions(card);
+      const selectableCount = bloomOptions.filter((option) => option.selectable).length;
+      if (selectableCount <= 0) {
+        const reasonSummary = Array.from(
+          new Set(
+            bloomOptions.map((option) => option.reason).filter((reason): reason is string => Boolean(reason)),
+          ),
+        );
+        return {
+          kind,
+          selectable: false,
+          bloomOptions,
+          reason:
+            reasonSummary.length > 0
+              ? `目前沒有可執行 BLOOM 的對象。原因：${reasonSummary.join('；')}`
+              : '目前沒有可執行 BLOOM 的對象。',
+        };
+      }
+      return { kind, selectable: true, bloomOptions };
+    }
+
+    return { kind, selectable: true };
+  };
+
   const openHandAction = (card: ZoneCardInstance) => {
-    const defaultKind = resolveDefaultHandAction(card);
-    if (!defaultKind) {
+    const availability = resolveHandActionAvailability(card);
+    if (!availability.kind) {
+      if (availability.reason) {
+        setInfoModalMessage(availability.reason);
+      }
+      return;
+    }
+    if (!availability.selectable) {
+      setInfoModalMessage(availability.reason ?? '目前不可操作。');
       return;
     }
 
-    const bloomTargets = defaultKind === 'BLOOM' ? resolveBloomTargets(card) : [];
-    if (defaultKind === 'BLOOM' && bloomTargets.length === 0) {
-      setInfoModalMessage('目前沒有可執行 BLOOM 的對象。');
-      return;
-    }
+    const bloomTargetOptions = availability.bloomOptions ?? [];
+    const selectableBloomTargets = bloomTargetOptions.filter((option) => option.selectable);
 
     setPendingHandAction({
       card,
-      kind: defaultKind,
+      kind: availability.kind,
       targetZone: 'BACK',
       targetHolomemCardInstanceId:
-        defaultKind === 'ATTACH_CHEER'
+        availability.kind === 'ATTACH_CHEER'
           ? (myHolomems[0]?.cardInstanceId ?? null)
-          : defaultKind === 'BLOOM'
-            ? (bloomTargets[0]?.cardInstanceId ?? null)
+          : availability.kind === 'BLOOM'
+            ? (selectableBloomTargets[0]?.target.cardInstanceId ?? null)
             : null,
     });
   };
@@ -597,34 +724,11 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     ];
   }, [myHolomems, opponentTargets, cardInfoById]);
 
-  const summarizeCheerColors = (card: ZoneCardInstance): string => {
-    const colorCounts = card.cheerColorCounts ?? {};
-    const parts = Object.entries(colorCounts)
-      .filter(([, count]) => typeof count === 'number' && count > 0)
-      .sort(([a], [b]) => resolveCheerColorLabel(a).localeCompare(resolveCheerColorLabel(b), 'zh-Hant'))
-      .map(([color, count]) => `${resolveCheerColorLabel(color)}*${count}`);
-    if (parts.length > 0) {
-      return parts.join(' / ');
-    }
-    const cheerCount = card.cheerCount ?? 0;
-    return cheerCount > 0 ? `エール*${cheerCount}` : 'エール*0';
-  };
-
-  const formatBloomTargetLabel = (target: ZoneCardInstance): string => {
-    const zoneLabel = resolveStageZoneLabel(target.zone);
-    const hp =
-      target.maxHp != null
-        ? `${target.currentHp ?? Math.max(target.maxHp - (target.damageTaken ?? 0), 0)}/${target.maxHp}`
-        : '-';
-    const supportCount = target.attachedSupportCount ?? 0;
-    return `${cardName(target)} [${zoneLabel}] HP ${hp} / ${summarizeCheerColors(target)} / 裝備*${supportCount}`;
-  };
-
   const bloomTargetOptions = useMemo(() => {
     if (!pendingHandAction || pendingHandAction.kind !== 'BLOOM') {
       return [];
     }
-    return resolveBloomTargets(pendingHandAction.card);
+    return resolveBloomTargetOptions(pendingHandAction.card);
   }, [pendingHandAction, myHolomems, cardInfoById]);
 
   const confirmHandAction = async () => {
@@ -678,8 +782,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   };
 
   const handleMyZoneClick = async (zoneId: number) => {
-    if (!canSubmitAction) {
-      setInfoModalMessage('目前有待處理互動，請先完成確認。');
+    const blockedReason = resolveGlobalActionBlockReason();
+    if (blockedReason) {
+      setInfoModalMessage(blockedReason);
       return;
     }
 
@@ -702,8 +807,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   };
 
   const handleMyZoneCardClick = (zoneId: number, card: ZoneCardInstance) => {
-    if (!canSubmitAction) {
-      setInfoModalMessage('目前有待處理互動，請先完成確認。');
+    const blockedReason = resolveGlobalActionBlockReason();
+    if (blockedReason) {
+      setInfoModalMessage(blockedReason);
       return;
     }
     if (zoneId !== 4) {
@@ -763,6 +869,18 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     return hasCheerInDeck && hasHolomemOnStage;
   }, [myState?.cheerDeckCount, myHolomems.length]);
 
+  useEffect(() => {
+    if (!errorMessage) {
+      lastExternalErrorRef.current = null;
+      return;
+    }
+    if (lastExternalErrorRef.current === errorMessage) {
+      return;
+    }
+    lastExternalErrorRef.current = errorMessage;
+    setInfoModalMessage(errorMessage);
+  }, [errorMessage]);
+
   const handleEndTurnClick = async () => {
     if (busy || !isMyTurn) {
       return;
@@ -779,6 +897,21 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       return;
     }
     await onEndTurn();
+  };
+
+  const handleConcedeClick = () => {
+    if (busy || currentMatch.status !== 'STARTED') {
+      return;
+    }
+    setShowConcedeConfirm(true);
+  };
+
+  const confirmConcede = async () => {
+    if (busy) {
+      return;
+    }
+    await onConcede();
+    setShowConcedeConfirm(false);
   };
 
   const toggleDecisionSelection = (cardInstanceId: number) => {
@@ -832,6 +965,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     if (activePendingInteraction.interactionType === 'DRAW_REVEAL') {
       return true;
     }
+    if (activePendingInteraction.interactionType === 'LOOK_TOP_DECK') {
+      return selectedInteractionPlacement != null;
+    }
     if (activePendingInteraction.interactionType === 'SEND_CHEER') {
       return (
         selectedInteractionCardInstanceIds.length >= Math.max(activePendingInteraction.minSelect, 1) &&
@@ -839,7 +975,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       );
     }
     return false;
-  }, [activePendingInteraction, busy, selectedInteractionCardInstanceIds]);
+  }, [activePendingInteraction, busy, selectedInteractionCardInstanceIds, selectedInteractionPlacement]);
 
   const actionActorLabel = (action: RecentMatchAction): string => {
     if (currentUserId == null) {
@@ -865,6 +1001,55 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     };
   };
 
+  const renderTargetCandidateCard = (
+    candidate: TargetCandidateCard,
+    options?: {
+      selected?: boolean;
+      selectable?: boolean;
+      onClick?: () => void;
+      showZone?: boolean;
+      className?: string;
+    },
+  ) => {
+    const selected = options?.selected ?? false;
+    const selectable = options?.selectable ?? false;
+    const metaLines = resolveCandidateMetaLines(candidate);
+    const info = cardInfoById[candidate.cardId];
+    const imageUrl = candidate.imageUrl ?? info?.imageUrl ?? null;
+    const displayName = candidate.name ?? info?.name ?? candidate.cardId;
+    const zoneLabel = resolveStageZoneLabel(candidate.zone ?? undefined);
+    const className = options?.className ?? 'battle-interaction-modal__card';
+
+    return (
+      <button
+        key={candidate.cardInstanceId}
+        type="button"
+        className={`${className}${selected ? ' is-selected' : ''}`}
+        disabled={!selectable || busy}
+        onClick={options?.onClick}
+      >
+        {imageUrl ? (
+          <img className="card-visual card-visual--front" src={imageUrl} alt={displayName} loading="lazy" />
+        ) : (
+          <div className="card-visual card-visual--placeholder">
+            <span>{displayName}</span>
+          </div>
+        )}
+        <figcaption>{displayName}</figcaption>
+        {options?.showZone ? <span className="battle-candidate-meta__line">區位：{zoneLabel}</span> : null}
+        {metaLines.length > 0 ? (
+          <span className="battle-candidate-meta">
+            {metaLines.map((line) => (
+              <span key={`${candidate.cardInstanceId}-${line}`} className="battle-candidate-meta__line">
+                {line}
+              </span>
+            ))}
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
   return (
     <>
       <div className="screen-header">
@@ -884,6 +1069,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         <div className="screen-header__actions">
           <button type="button" onClick={() => void handleEndTurnClick()} disabled={busy || !isMyTurn}>
             End Turn
+          </button>
+          <button type="button" onClick={handleConcedeClick} disabled={busy || currentMatch.status !== 'STARTED'}>
+            投降
           </button>
           <button type="button" onClick={onBackToLobby}>
             回到 Lobby
@@ -918,8 +1106,11 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
           {myHandCards.map((card) => {
             const info = cardInfoById[card.cardId];
             const type = cardType(card);
-            const defaultAction = resolveDefaultHandAction(card);
-            const disabled = !canSubmitAction || defaultAction == null;
+            const availability = resolveHandActionAvailability(card);
+            const disabled = busy || availability.kind == null;
+            const title = availability.selectable
+              ? '點擊執行操作'
+              : (availability.reason ?? '目前不可操作');
 
             return (
               <button
@@ -928,7 +1119,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                 className="hand-card"
                 disabled={disabled}
                 onClick={() => openHandAction(card)}
-                title={disabled ? '目前不可操作' : '點擊執行操作'}
+                title={title}
               >
                 {info?.imageUrl ? (
                   <img className="card-visual card-visual--front" src={info.imageUrl} alt={info.name} loading="lazy" />
@@ -939,6 +1130,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                 )}
                 <span className="hand-card__name">{info?.name ?? '載入中'}</span>
                 <span className="hand-card__meta">{cardTypeLabel(type)}</span>
+                {!availability.selectable && availability.kind ? (
+                  <span className="hand-card__meta">不可用：{availability.reason ?? '目前不可操作'}</span>
+                ) : null}
               </button>
             );
           })}
@@ -1007,42 +1201,13 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
           </p>
           <div className="battle-decision-panel__candidates">
             {activePendingDecision.candidates.map((candidate) => {
-              const selected = selectedDecisionCardInstanceIds.includes(candidate.cardInstanceId);
-              const info = cardInfoById[candidate.cardId];
-              const metaLines = resolveCandidateMetaLines(candidate);
-              return (
-                <button
-                  key={candidate.cardInstanceId}
-                  type="button"
-                  className={`battle-decision-card${selected ? ' is-selected' : ''}`}
-                  onClick={() => toggleDecisionSelection(candidate.cardInstanceId)}
-                >
-                  {info?.imageUrl ? (
-                    <img
-                      className="card-visual card-visual--front"
-                      src={info.imageUrl}
-                      alt={info.name ?? candidate.name ?? candidate.cardId}
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="card-visual card-visual--placeholder">
-                      <span>{candidate.name ?? candidate.cardId}</span>
-                    </div>
-                  )}
-                  <span className="hand-card__name">{candidate.name ?? info?.name ?? candidate.cardId}</span>
-                  {metaLines.length > 0 ? (
-                    <span className="battle-candidate-meta">
-                      {metaLines.map((line) => (
-                        <span key={`${candidate.cardInstanceId}-${line}`} className="battle-candidate-meta__line">
-                          {line}
-                        </span>
-                      ))}
-                    </span>
-                  ) : (
-                    <span className="hand-card__meta">可選目標</span>
-                  )}
-                </button>
-              );
+              return renderTargetCandidateCard(candidate, {
+                selected: selectedDecisionCardInstanceIds.includes(candidate.cardInstanceId),
+                selectable: true,
+                onClick: () => toggleDecisionSelection(candidate.cardInstanceId),
+                showZone: true,
+                className: 'battle-decision-card',
+              });
             })}
           </div>
           <div className="battle-decision-panel__actions">
@@ -1143,30 +1308,34 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                 {cardInfoById[pendingHandAction.card.cardId]?.memberEffectText ? (
                   <p className="battle-action-modal__effect">{cardInfoById[pendingHandAction.card.cardId]?.memberEffectText}</p>
                 ) : null}
-                <label>
-                  BLOOM 目標
-                  <select
-                    value={pendingHandAction.targetHolomemCardInstanceId ?? ''}
-                    onChange={(event) =>
-                      setPendingHandAction((previous) => {
-                        if (!previous) {
-                          return previous;
+                <p>BLOOM 目標</p>
+                <div className="battle-interaction-modal__cards">
+                  {bloomTargetOptions.map((option) =>
+                    renderTargetCandidateCard(option.target, {
+                      selected: pendingHandAction.targetHolomemCardInstanceId === option.target.cardInstanceId,
+                      selectable: option.selectable,
+                      onClick: () => {
+                        if (!option.selectable) {
+                          setInfoModalMessage(option.reason ?? '目前不可對此目標執行 BLOOM。');
+                          return;
                         }
-                        return {
-                          ...previous,
-                          targetHolomemCardInstanceId: event.target.value ? Number(event.target.value) : null,
-                        };
-                      })
-                    }
-                  >
-                    <option value="">選擇要 BLOOM 的 Holomem</option>
-                    {bloomTargetOptions.map((target) => (
-                      <option key={target.cardInstanceId} value={target.cardInstanceId}>
-                        {formatBloomTargetLabel(target)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                        setPendingHandAction((previous) => {
+                          if (!previous) {
+                            return previous;
+                          }
+                          return {
+                            ...previous,
+                            targetHolomemCardInstanceId: option.target.cardInstanceId,
+                          };
+                        });
+                      },
+                      showZone: true,
+                    }),
+                  )}
+                </div>
+                {bloomTargetOptions.some((option) => !option.selectable) ? (
+                  <p className="battle-action-modal__effect">不可選目標點擊後會顯示不可 BLOOM 原因。</p>
+                ) : null}
                 <p className="battle-action-modal__effect">BLOOM 後會繼承目標目前附加的エール與裝備狀態。</p>
               </div>
             ) : null}
@@ -1313,6 +1482,29 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         </section>
       ) : null}
 
+      {showConcedeConfirm ? (
+        <section className="battle-action-modal" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="battle-action-modal__backdrop"
+            aria-label="投降確認背景"
+            onClick={() => setShowConcedeConfirm(false)}
+          />
+          <div className="battle-action-modal__panel">
+            <h3>確認投降</h3>
+            <p>確認後將直接結束此場對戰，並判定你敗北。</p>
+            <div className="battle-action-modal__actions">
+              <button type="button" onClick={() => setShowConcedeConfirm(false)}>
+                取消
+              </button>
+              <button type="button" onClick={() => void confirmConcede()} disabled={busy}>
+                確認投降
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {infoModalMessage ? (
         <section className="battle-action-modal" role="dialog" aria-modal="true">
           <button type="button" className="battle-action-modal__backdrop" aria-label="提示背景" />
@@ -1336,44 +1528,40 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
             <p>{activePendingInteraction.message ?? '請確認後繼續。'}</p>
 
             <div className="battle-interaction-modal__cards">
-              {activePendingInteraction.cards.map((card) => {
-                const info = cardInfoById[card.cardId];
-                const imageUrl = card.imageUrl ?? info?.imageUrl ?? null;
-                const name = card.name ?? info?.name ?? card.cardId;
-                const selectable = activePendingInteraction.interactionType === 'SEND_CHEER';
-                const selected = selectedInteractionCardInstanceIds.includes(card.cardInstanceId);
-                const metaLines = resolveCandidateMetaLines(card);
-                const zoneLabel = resolveStageZoneLabel(card.zone);
-                return (
-                  <button
-                    key={card.cardInstanceId}
-                    type="button"
-                    className={`battle-interaction-modal__card${selected ? ' is-selected' : ''}`}
-                    disabled={!selectable || busy}
-                    onClick={() => toggleInteractionSelection(card.cardInstanceId)}
-                  >
-                    {imageUrl ? (
-                      <img className="card-visual card-visual--front" src={imageUrl} alt={name} loading="lazy" />
-                    ) : (
-                      <div className="card-visual card-visual--placeholder">
-                        <span>{name}</span>
-                      </div>
-                    )}
-                    <figcaption>{name}</figcaption>
-                    <span className="battle-candidate-meta__line">區位：{zoneLabel}</span>
-                    {metaLines.length > 0 ? (
-                      <div className="battle-candidate-meta">
-                        {metaLines.map((line) => (
-                          <span key={`${card.cardInstanceId}-${line}`} className="battle-candidate-meta__line">
-                            {line}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-                );
-              })}
+              {activePendingInteraction.cards.map((card) =>
+                renderTargetCandidateCard(card, {
+                  selected: selectedInteractionCardInstanceIds.includes(card.cardInstanceId),
+                  selectable: activePendingInteraction.interactionType === 'SEND_CHEER',
+                  onClick: () => toggleInteractionSelection(card.cardInstanceId),
+                  showZone: true,
+                }),
+              )}
             </div>
+
+            {activePendingInteraction.interactionType === 'LOOK_TOP_DECK' ? (
+              <div className="battle-interaction-modal__placement">
+                {(activePendingInteraction.placementOptions?.length
+                  ? activePendingInteraction.placementOptions
+                  : ['TOP', 'BOTTOM']
+                ).map((option) => {
+                  const normalizedOption = option.trim().toUpperCase() === 'BOTTOM' ? 'BOTTOM' : 'TOP';
+                  const label = normalizedOption === 'TOP' ? '保留在牌庫頂' : '放到底部';
+                  return (
+                    <button
+                      key={normalizedOption}
+                      type="button"
+                      className={`battle-interaction-modal__placement-option${
+                        selectedInteractionPlacement === normalizedOption ? ' is-selected' : ''
+                      }`}
+                      disabled={busy}
+                      onClick={() => setSelectedInteractionPlacement(normalizedOption)}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
 
             <div className="battle-action-modal__actions">
               <button
@@ -1386,6 +1574,10 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                       activePendingInteraction.interactionType === 'SEND_CHEER'
                         ? selectedInteractionCardInstanceIds
                         : [],
+                    placement:
+                      activePendingInteraction.interactionType === 'LOOK_TOP_DECK'
+                        ? selectedInteractionPlacement ?? undefined
+                        : undefined,
                   })
                 }
               >

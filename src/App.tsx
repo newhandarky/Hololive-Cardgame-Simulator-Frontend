@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useEffect, useMemo, useState, type FC } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type FC } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import './App.css';
 import { GameRoomScreen } from './components/screens/GameRoomScreen';
@@ -13,9 +13,12 @@ import {
   attachCheer,
   attackArt,
   bloom,
+  concede,
+  createBackgroundAsset,
   createMatch,
   drawTurn,
   endTurn,
+  getBackgroundAssets,
   getMyDeckList,
   getMatch,
   getMatchState,
@@ -48,6 +51,23 @@ import {
 } from './services/api';
 
 const MOCK_ID_STORAGE_KEY = 'mockLineId';
+const BACKGROUND_CUSTOMIZATION_STORAGE_KEY = 'holoBackgroundCustomizationV1';
+
+interface BackgroundCustomizationState {
+  fieldBackgroundUrls: string[];
+  cardAndCheerBackgroundUrls: string[];
+  selectedFieldBackgroundUrl: string | null;
+  selectedCardBackgroundUrl: string | null;
+  selectedCheerBackgroundUrl: string | null;
+}
+
+const DEFAULT_BACKGROUND_CUSTOMIZATION: BackgroundCustomizationState = {
+  fieldBackgroundUrls: [],
+  cardAndCheerBackgroundUrls: [],
+  selectedFieldBackgroundUrl: null,
+  selectedCardBackgroundUrl: null,
+  selectedCheerBackgroundUrl: null,
+};
 
 const createDefaultMockLineId = (): string => {
   return `frontend_${Math.floor(Math.random() * 1000000)}`;
@@ -62,6 +82,48 @@ const getInitialMockLineId = (): string => {
   const generated = createDefaultMockLineId();
   sessionStorage.setItem(MOCK_ID_STORAGE_KEY, generated);
   return generated;
+};
+
+const normalizeImageUrl = (value: string): string | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+const toCssImageValue = (url: string | null): string => {
+  if (!url || !url.trim()) {
+    return 'none';
+  }
+  return `url("${url.replace(/"/g, '\\"')}")`;
+};
+
+const loadBackgroundCustomization = (): BackgroundCustomizationState => {
+  const raw = localStorage.getItem(BACKGROUND_CUSTOMIZATION_STORAGE_KEY);
+  if (!raw) {
+    return DEFAULT_BACKGROUND_CUSTOMIZATION;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<BackgroundCustomizationState>;
+    return {
+      fieldBackgroundUrls: [],
+      cardAndCheerBackgroundUrls: [],
+      selectedFieldBackgroundUrl: normalizeImageUrl(parsed.selectedFieldBackgroundUrl ?? '') ?? null,
+      selectedCardBackgroundUrl: normalizeImageUrl(parsed.selectedCardBackgroundUrl ?? '') ?? null,
+      selectedCheerBackgroundUrl: normalizeImageUrl(parsed.selectedCheerBackgroundUrl ?? '') ?? null,
+    };
+  } catch {
+    return DEFAULT_BACKGROUND_CUSTOMIZATION;
+  }
 };
 
 interface GameRoomRouteProps {
@@ -82,6 +144,8 @@ interface GameRoomRouteProps {
   onMoveStageHolomem: (payload: MoveStageHolomemActionRequest) => Promise<void>;
   onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
+  onConcede: () => Promise<void>;
+  errorMessage: string | null;
   onBackToLobby: () => void;
 }
 
@@ -104,6 +168,8 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
   onMoveStageHolomem,
   onResolveDecision,
   onEndTurn,
+  onConcede,
+  errorMessage,
   onBackToLobby,
 }) => {
   const { matchId } = useParams<{ matchId: string }>();
@@ -152,6 +218,8 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
       onMoveStageHolomem={onMoveStageHolomem}
       onResolveDecision={onResolveDecision}
       onEndTurn={onEndTurn}
+      onConcede={onConcede}
+      errorMessage={errorMessage}
       onBackToLobby={onBackToLobby}
     />
   );
@@ -177,6 +245,9 @@ const App: FC = () => {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backgroundCustomization, setBackgroundCustomization] = useState<BackgroundCustomizationState>(
+    loadBackgroundCustomization,
+  );
 
   const userMap = useMemo(() => {
     return new Map(users.map((user) => [user.id, user]));
@@ -209,6 +280,91 @@ const App: FC = () => {
     if (!opponentPlayer) return '對手玩家';
     return userMap.get(opponentPlayer.userId)?.displayName ?? `玩家 #${opponentPlayer.userId}`;
   }, [opponentPlayer, userMap]);
+  const appStyle = useMemo<CSSProperties>(
+    () =>
+      ({
+        '--custom-battlefield-image': toCssImageValue(backgroundCustomization.selectedFieldBackgroundUrl),
+        '--custom-card-back-image': toCssImageValue(backgroundCustomization.selectedCardBackgroundUrl),
+        '--custom-cheer-back-image': toCssImageValue(backgroundCustomization.selectedCheerBackgroundUrl),
+      }) as CSSProperties,
+    [
+      backgroundCustomization.selectedCardBackgroundUrl,
+      backgroundCustomization.selectedCheerBackgroundUrl,
+      backgroundCustomization.selectedFieldBackgroundUrl,
+    ],
+  );
+
+  const addFieldBackgroundUrl = async (url: string) => {
+    const normalized = normalizeImageUrl(url);
+    if (!normalized) {
+      setError('場地背景 URL 無效，請輸入 http/https 圖片網址');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await withReauth(() => createBackgroundAsset({ category: 'FIELD', imageUrl: normalized }));
+      const fieldAssets = await withReauth(() => getBackgroundAssets('FIELD'));
+      setBackgroundCustomization((previous) => ({
+        ...previous,
+        fieldBackgroundUrls: fieldAssets.map((asset) => asset.imageUrl),
+      }));
+    } catch (err) {
+      setError(getApiErrorMessage(err, '新增場地背景失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addCardAndCheerBackgroundUrl = async (url: string) => {
+    const normalized = normalizeImageUrl(url);
+    if (!normalized) {
+      setError('卡片/エール 背景 URL 無效，請輸入 http/https 圖片網址');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await withReauth(() => createBackgroundAsset({ category: 'CARD', imageUrl: normalized }));
+      const cardAssets = await withReauth(() => getBackgroundAssets('CARD'));
+      setBackgroundCustomization((previous) => ({
+        ...previous,
+        cardAndCheerBackgroundUrls: cardAssets.map((asset) => asset.imageUrl),
+      }));
+    } catch (err) {
+      setError(getApiErrorMessage(err, '新增卡片/エール 背景失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectFieldBackgroundUrl = (url: string | null) => {
+    const normalized = url == null ? null : normalizeImageUrl(url);
+    setBackgroundCustomization((previous) => ({
+      ...previous,
+      selectedFieldBackgroundUrl: normalized,
+    }));
+  };
+
+  const selectCardBackgroundUrl = (url: string | null) => {
+    const normalized = url == null ? null : normalizeImageUrl(url);
+    setBackgroundCustomization((previous) => ({
+      ...previous,
+      selectedCardBackgroundUrl: normalized,
+    }));
+  };
+
+  const selectCheerBackgroundUrl = (url: string | null) => {
+    const normalized = url == null ? null : normalizeImageUrl(url);
+    setBackgroundCustomization((previous) => ({
+      ...previous,
+      selectedCheerBackgroundUrl: normalized,
+    }));
+  };
 
   // 模擬 LINE 登入，並在 localStorage 保存 JWT
   const authenticate = async (lineId: string) => {
@@ -297,6 +453,23 @@ const App: FC = () => {
     }
   };
 
+  const loadSharedBackgroundAssets = async () => {
+    try {
+      const [fieldAssets, cardAssets] = await Promise.all([
+        withReauth(() => getBackgroundAssets('FIELD')),
+        withReauth(() => getBackgroundAssets('CARD')),
+      ]);
+      setBackgroundCustomization((previous) => ({
+        ...previous,
+        fieldBackgroundUrls: fieldAssets.map((asset) => asset.imageUrl),
+        cardAndCheerBackgroundUrls: cardAssets.map((asset) => asset.imageUrl),
+      }));
+    } catch (err) {
+      setError(getApiErrorMessage(err, '載入共享背景庫失敗'));
+      console.error(err);
+    }
+  };
+
   // 讀取指定房間的場地快照，供 GameRoom 直接渲染
   const loadGameState = async (matchId: number) => {
     const snapshot = await withReauth(() => getMatchState(matchId));
@@ -335,13 +508,28 @@ const App: FC = () => {
         console.error(err);
       }
 
-      await Promise.all([loadUsers(), loadMyDecks()]);
+      await Promise.all([loadUsers(), loadMyDecks(), loadSharedBackgroundAssets()]);
     };
 
     void init();
     // 僅在頁面載入時初始化一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      BACKGROUND_CUSTOMIZATION_STORAGE_KEY,
+      JSON.stringify({
+        selectedFieldBackgroundUrl: backgroundCustomization.selectedFieldBackgroundUrl,
+        selectedCardBackgroundUrl: backgroundCustomization.selectedCardBackgroundUrl,
+        selectedCheerBackgroundUrl: backgroundCustomization.selectedCheerBackgroundUrl,
+      }),
+    );
+  }, [
+    backgroundCustomization.selectedCardBackgroundUrl,
+    backgroundCustomization.selectedCheerBackgroundUrl,
+    backgroundCustomization.selectedFieldBackgroundUrl,
+  ]);
 
   // 當使用者直接輸入 /game-room/:id 時，補抓該房間資料
   useEffect(() => {
@@ -522,7 +710,7 @@ const App: FC = () => {
       setCurrentMatch(null);
       setCurrentGameState(null);
       navigate('/lobby', { replace: true });
-      await Promise.all([loadUsers(), loadMyDecks()]);
+      await Promise.all([loadUsers(), loadMyDecks(), loadSharedBackgroundAssets()]);
     } catch (err) {
       setError('Failed to sign in with this mock user id.');
       console.error(err);
@@ -646,6 +834,26 @@ const App: FC = () => {
       await loadGameState(match.matchId);
     } catch (err) {
       setError(getApiErrorMessage(err, 'End Turn 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConcede = async () => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => concede(currentMatch.matchId));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, '投降失敗'));
       console.error(err);
       await syncMatchState(currentMatch.matchId);
     } finally {
@@ -834,7 +1042,7 @@ const App: FC = () => {
   };
 
   return (
-    <main className="app">
+    <main className="app" style={appStyle}>
       <Routes>
         <Route path="/" element={<Navigate to="/lobby" replace />} />
         <Route
@@ -864,6 +1072,16 @@ const App: FC = () => {
               onToggleReady={handleToggleReady}
               onStartMatch={handleStart}
               onSelectDeck={handleSelectDeck}
+              fieldBackgroundUrls={backgroundCustomization.fieldBackgroundUrls}
+              cardAndCheerBackgroundUrls={backgroundCustomization.cardAndCheerBackgroundUrls}
+              selectedFieldBackgroundUrl={backgroundCustomization.selectedFieldBackgroundUrl}
+              selectedCardBackgroundUrl={backgroundCustomization.selectedCardBackgroundUrl}
+              selectedCheerBackgroundUrl={backgroundCustomization.selectedCheerBackgroundUrl}
+              onAddFieldBackgroundUrl={addFieldBackgroundUrl}
+              onAddCardAndCheerBackgroundUrl={addCardAndCheerBackgroundUrl}
+              onSelectFieldBackgroundUrl={selectFieldBackgroundUrl}
+              onSelectCardBackgroundUrl={selectCardBackgroundUrl}
+              onSelectCheerBackgroundUrl={selectCheerBackgroundUrl}
             />
           }
         />
@@ -888,6 +1106,8 @@ const App: FC = () => {
               onMoveStageHolomem={handleMoveStageHolomem}
               onResolveDecision={handleResolveDecision}
               onEndTurn={handleEndTurn}
+              onConcede={handleConcede}
+              errorMessage={error}
               onBackToLobby={() => navigate('/lobby', { replace: true })}
             />
           }

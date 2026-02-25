@@ -61,6 +61,21 @@ export interface LobbyEvent {
   gameState?: GameState;
 }
 
+export type BackgroundAssetCategory = 'FIELD' | 'CARD';
+
+export interface SharedBackgroundAsset {
+  id: number;
+  category: BackgroundAssetCategory;
+  imageUrl: string;
+  createdByUserId: number;
+  createdAt: string;
+}
+
+export interface CreateSharedBackgroundAssetRequest {
+  category: BackgroundAssetCategory;
+  imageUrl: string;
+}
+
 export interface CardSummary {
   cardId: string;
   name: string;
@@ -209,6 +224,7 @@ export interface ZoneCardInstance {
   currentHp?: number | null;
   maxHp?: number | null;
   damageTaken?: number | null;
+  currentAttack?: number | null;
   cheerCount?: number | null;
   cheerColorCounts?: Record<string, number> | null;
   attachedSupportCount?: number | null;
@@ -243,6 +259,7 @@ export interface PendingDecisionCandidate {
   damageTaken?: number | null;
   cheerCount?: number | null;
   cheerColorCounts?: Record<string, number> | null;
+  attachedSupportCount?: number | null;
 }
 
 export interface PendingDecision {
@@ -271,6 +288,9 @@ export interface PendingInteraction {
   targetHolomemCardInstanceId?: number | null;
   title?: string | null;
   message?: string | null;
+  lookedCardInstanceId?: number | null;
+  lookedCardId?: string | null;
+  placementOptions?: string[] | null;
   createdAt: string;
   cards: PendingDecisionCandidate[];
 }
@@ -317,6 +337,7 @@ export interface AttackArtActionRequest {
 export interface ResolveDecisionActionRequest {
   decisionId: number;
   selectedCardInstanceIds?: number[];
+  placement?: 'TOP' | 'BOTTOM';
 }
 
 export interface MoveStageHolomemActionRequest {
@@ -460,6 +481,11 @@ export const endTurn = async (matchId: number): Promise<LobbyMatch> => {
   return response.data;
 };
 
+export const concede = async (matchId: number): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/concede`);
+  return response.data;
+};
+
 export const resolveDecision = async (
   matchId: number,
   payload: ResolveDecisionActionRequest,
@@ -470,6 +496,20 @@ export const resolveDecision = async (
 
 export const getMatchState = async (matchId: number): Promise<GameState> => {
   const response = await api.get<GameState>(`/matches/${matchId}/state`);
+  return response.data;
+};
+
+export const getBackgroundAssets = async (
+  category: BackgroundAssetCategory,
+): Promise<SharedBackgroundAsset[]> => {
+  const response = await api.get<SharedBackgroundAsset[]>(`/background-assets`, { params: { category } });
+  return response.data;
+};
+
+export const createBackgroundAsset = async (
+  payload: CreateSharedBackgroundAssetRequest,
+): Promise<SharedBackgroundAsset> => {
+  const response = await api.post<SharedBackgroundAsset>(`/background-assets`, payload);
   return response.data;
 };
 

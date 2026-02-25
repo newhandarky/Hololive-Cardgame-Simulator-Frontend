@@ -20,7 +20,7 @@ interface FieldZoneProps {
 
 const STACK_PREVIEW_ZONE_IDS = new Set<ZoneId>([5, 8, 9]);
 
-// 單一場地區塊元件：顯示編號、區位名稱、張數與卡片視覺
+// 單一場地區塊元件：顯示區位名稱、張數與卡片視覺
 export const FieldZone: FC<FieldZoneProps> = ({
   id,
   variant = 'card',
@@ -40,7 +40,7 @@ export const FieldZone: FC<FieldZoneProps> = ({
       className={`field-zone field-zone--${variant}${onZoneClick ? ' field-zone--clickable' : ''}`}
       onClick={() => onZoneClick?.()}
     >
-      <span className="field-zone__index">{id}</span>
+      <span className="field-zone__label">{meta.title}</span>
       <div className="field-zone__content">
         <div className="field-zone__header">
           <p className="field-zone__title">{meta.title}</p>
@@ -56,6 +56,8 @@ export const FieldZone: FC<FieldZoneProps> = ({
               const cheerCount = card.cheerCount ?? 0;
               const hpText =
                 card.currentHp != null && card.maxHp != null ? `${card.currentHp}/${card.maxHp}` : null;
+              const attackText = card.currentAttack != null ? `${card.currentAttack}` : null;
+              const hasBattleStats = hpText != null || attackText != null;
               const content = (
                 <>
                   {revealCards ? (
@@ -67,7 +69,7 @@ export const FieldZone: FC<FieldZoneProps> = ({
                       </div>
                     )
                   ) : (
-                    <div className="card-visual card-visual--back">
+                    <div className={`card-visual ${id === 8 || id === 9 ? 'card-visual--cheer-back' : 'card-visual--back'}`}>
                       <span>HOLO</span>
                     </div>
                   )}
@@ -78,7 +80,12 @@ export const FieldZone: FC<FieldZoneProps> = ({
                     <span className="field-zone__badge field-zone__badge--cheer">吶喊 {cheerCount}</span>
                   ) : null}
                   {revealCards ? <p className="field-zone__card-name">{cardName}</p> : null}
-                  {revealCards && hpText ? <p className="field-zone__card-hp">HP {hpText}</p> : null}
+                  {revealCards && hasBattleStats ? (
+                    <div className="field-zone__stats-overlay">
+                      {hpText ? <p className="field-zone__card-stat-line">HP {hpText}</p> : null}
+                      {attackText ? <p className="field-zone__card-stat-line">ATK {attackText}</p> : null}
+                    </div>
+                  ) : null}
                 </>
               );
 
