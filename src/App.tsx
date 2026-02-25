@@ -12,7 +12,9 @@ import {
   activateMyDeck,
   attachCheer,
   attackArt,
+  bloom,
   createMatch,
+  drawTurn,
   endTurn,
   getMyDeckList,
   getMatch,
@@ -22,20 +24,24 @@ import {
   healthCheck,
   joinMatch,
   loginWithLine,
+  moveStageHolomem,
   playSupport,
   playToStage,
   resolveDecision,
+  sendTurnCheer,
   setMatchReady,
   setupQuickDeck,
   startMatch,
   type AttachCheerActionRequest,
   type AttackArtActionRequest,
+  type BloomActionRequest,
   type ApiUser,
   type DeckSummary,
   type GameState,
   type LobbyEvent,
   type LobbyMatch,
   type LobbyPlayer,
+  type MoveStageHolomemActionRequest,
   type PlaySupportActionRequest,
   type PlayToStageActionRequest,
   type ResolveDecisionActionRequest,
@@ -68,8 +74,12 @@ interface GameRoomRouteProps {
   busy: boolean;
   onPlayToStage: (payload: PlayToStageActionRequest) => Promise<void>;
   onPlaySupport: (payload: PlaySupportActionRequest) => Promise<void>;
+  onBloom: (payload: BloomActionRequest) => Promise<void>;
   onAttachCheer: (payload: AttachCheerActionRequest) => Promise<void>;
   onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
+  onDrawTurn: () => Promise<void>;
+  onSendTurnCheer: () => Promise<void>;
+  onMoveStageHolomem: (payload: MoveStageHolomemActionRequest) => Promise<void>;
   onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onBackToLobby: () => void;
@@ -86,8 +96,12 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
   busy,
   onPlayToStage,
   onPlaySupport,
+  onBloom,
   onAttachCheer,
   onAttackArt,
+  onDrawTurn,
+  onSendTurnCheer,
+  onMoveStageHolomem,
   onResolveDecision,
   onEndTurn,
   onBackToLobby,
@@ -130,8 +144,12 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
       busy={busy}
       onPlayToStage={onPlayToStage}
       onPlaySupport={onPlaySupport}
+      onBloom={onBloom}
       onAttachCheer={onAttachCheer}
       onAttackArt={onAttackArt}
+      onDrawTurn={onDrawTurn}
+      onSendTurnCheer={onSendTurnCheer}
+      onMoveStageHolomem={onMoveStageHolomem}
       onResolveDecision={onResolveDecision}
       onEndTurn={onEndTurn}
       onBackToLobby={onBackToLobby}
@@ -285,6 +303,19 @@ const App: FC = () => {
     setCurrentGameState(snapshot);
   };
 
+  const syncMatchState = async (matchId: number) => {
+    try {
+      const [latestMatch, snapshot] = await Promise.all([
+        withReauth(() => getMatch(matchId)),
+        withReauth(() => getMatchState(matchId)),
+      ]);
+      setCurrentMatch(latestMatch);
+      setCurrentGameState(snapshot);
+    } catch (err) {
+      console.error('Sync match state failed', err);
+    }
+  };
+
   // 初始流程：健康檢查 -> mock 登入 -> 載入使用者清單與牌組清單
   useEffect(() => {
     const init = async () => {
@@ -395,6 +426,78 @@ const App: FC = () => {
       socket.close();
     };
   }, [currentMatch?.matchId]);
+
+  // Lobby 狀態補償輪詢：若 WS 在某些情境漏事件，仍可讓加入方同步進入 STARTED。
+  useEffect(() => {
+    if (!currentMatch || currentMatch.status === 'STARTED') {
+      return;
+    }
+
+    let cancelled = false;
+    const pollMatchStatus = async () => {
+      try {
+        const latest = await withReauth(() => getMatch(currentMatch.matchId));
+        if (cancelled) {
+          return;
+        }
+        setCurrentMatch(latest);
+        if (latest.status === 'STARTED') {
+          const snapshot = await withReauth(() => getMatchState(latest.matchId));
+          if (!cancelled) {
+            setCurrentGameState(snapshot);
+          }
+        }
+      } catch (err) {
+        console.error('Lobby polling failed', err);
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void pollMatchStatus();
+    }, 2000);
+    void pollMatchStatus();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMatch?.matchId, currentMatch?.status]);
+
+  // 對戰中狀態補償輪詢：避免 WS 漏事件時，phase/pending interaction 無法即時同步。
+  useEffect(() => {
+    if (!currentMatch || currentMatch.status !== 'STARTED') {
+      return;
+    }
+
+    let cancelled = false;
+    const pollGameState = async () => {
+      try {
+        const [latestMatch, snapshot] = await Promise.all([
+          withReauth(() => getMatch(currentMatch.matchId)),
+          withReauth(() => getMatchState(currentMatch.matchId)),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setCurrentMatch(latestMatch);
+        setCurrentGameState(snapshot);
+      } catch (err) {
+        console.error('Game polling failed', err);
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void pollGameState();
+    }, 1500);
+    void pollGameState();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMatch?.matchId, currentMatch?.status]);
 
   // 房間進入 STARTED 後，自動導向對應 GameRoom 路由
   useEffect(() => {
@@ -544,6 +647,7 @@ const App: FC = () => {
     } catch (err) {
       setError(getApiErrorMessage(err, 'End Turn 失敗'));
       console.error(err);
+      await syncMatchState(currentMatch.matchId);
     } finally {
       setBusy(false);
     }
@@ -563,6 +667,7 @@ const App: FC = () => {
     } catch (err) {
       setError(getApiErrorMessage(err, 'PLAY_TO_STAGE 失敗'));
       console.error(err);
+      await syncMatchState(currentMatch.matchId);
     } finally {
       setBusy(false);
     }
@@ -582,6 +687,27 @@ const App: FC = () => {
     } catch (err) {
       setError(getApiErrorMessage(err, 'PLAY_SUPPORT 失敗'));
       console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBloom = async (payload: BloomActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => bloom(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'BLOOM 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
     } finally {
       setBusy(false);
     }
@@ -601,6 +727,7 @@ const App: FC = () => {
     } catch (err) {
       setError(getApiErrorMessage(err, 'ATTACH_CHEER 失敗'));
       console.error(err);
+      await syncMatchState(currentMatch.matchId);
     } finally {
       setBusy(false);
     }
@@ -620,6 +747,67 @@ const App: FC = () => {
     } catch (err) {
       setError(getApiErrorMessage(err, 'ATTACK_ART 失敗'));
       console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDrawTurn = async () => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => drawTurn(currentMatch.matchId));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'DRAW_TURN 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSendTurnCheer = async () => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => sendTurnCheer(currentMatch.matchId));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'TURN_CHEER 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMoveStageHolomem = async (payload: MoveStageHolomemActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => moveStageHolomem(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'MOVE_STAGE_HOLOMEM 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
     } finally {
       setBusy(false);
     }
@@ -639,6 +827,7 @@ const App: FC = () => {
     } catch (err) {
       setError(getApiErrorMessage(err, '決策結算失敗'));
       console.error(err);
+      await syncMatchState(currentMatch.matchId);
     } finally {
       setBusy(false);
     }
@@ -691,8 +880,12 @@ const App: FC = () => {
               busy={busy}
               onPlayToStage={handlePlayToStage}
               onPlaySupport={handlePlaySupport}
+              onBloom={handleBloom}
               onAttachCheer={handleAttachCheer}
               onAttackArt={handleAttackArt}
+              onDrawTurn={handleDrawTurn}
+              onSendTurnCheer={handleSendTurnCheer}
+              onMoveStageHolomem={handleMoveStageHolomem}
               onResolveDecision={handleResolveDecision}
               onEndTurn={handleEndTurn}
               onBackToLobby={() => navigate('/lobby', { replace: true })}

@@ -1,5 +1,5 @@
 import { useMemo, type FC } from 'react';
-import type { PlayerZoneState } from '../../services/api';
+import type { PlayerZoneState, ZoneCardInstance } from '../../services/api';
 import { BOARD_SLOT_TO_ZONE } from '../../types/battlefield';
 import { FieldZone, type ZoneCardVisualInfo } from './FieldZone';
 
@@ -8,6 +8,9 @@ interface PlayerBattlefieldProps {
   zoneState: PlayerZoneState | null;
   reversed?: boolean;
   cardInfoById: Record<string, ZoneCardVisualInfo>;
+  interactive?: boolean;
+  onZoneClick?: (zoneId: number) => void;
+  onZoneCardClick?: (zoneId: number, card: ZoneCardInstance) => void;
 }
 
 const FACE_DOWN_SLOT_IDS = new Set<number>([5, 8, 9]);
@@ -18,6 +21,9 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
   zoneState,
   reversed = false,
   cardInfoById,
+  interactive = false,
+  onZoneClick,
+  onZoneCardClick,
 }) => {
   const boardZoneMap = useMemo(() => {
     const mapping = new Map<string, PlayerZoneState['boardZones'][number]>();
@@ -38,6 +44,21 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
     return boardZoneMap.get(zoneKey)?.cards ?? [];
   };
   const revealCards = (slotId: keyof typeof BOARD_SLOT_TO_ZONE): boolean => !FACE_DOWN_SLOT_IDS.has(slotId);
+  const resolveZoneClick = (slotId: keyof typeof BOARD_SLOT_TO_ZONE) => {
+    if (!interactive) {
+      return undefined;
+    }
+    if (slotId !== 5 && slotId !== 8) {
+      return undefined;
+    }
+    return () => onZoneClick?.(slotId);
+  };
+  const resolveCardClick = (slotId: keyof typeof BOARD_SLOT_TO_ZONE) => {
+    if (!interactive || slotId !== 4) {
+      return undefined;
+    }
+    return (card: ZoneCardInstance) => onZoneCardClick?.(slotId, card);
+  };
 
   return (
     <section className={`player-field ${reversed ? 'player-field--reversed' : ''}`}>
@@ -52,6 +73,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             cards={zoneCards(9)}
             cardInfoById={cardInfoById}
             revealCards={revealCards(9)}
+            onZoneClick={resolveZoneClick(9)}
+            onCardClick={resolveCardClick(9)}
           />
           <FieldZone
             id={8}
@@ -59,6 +82,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             cards={zoneCards(8)}
             cardInfoById={cardInfoById}
             revealCards={revealCards(8)}
+            onZoneClick={resolveZoneClick(8)}
+            onCardClick={resolveCardClick(8)}
           />
         </div>
 
@@ -70,6 +95,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
               cards={zoneCards(3)}
               cardInfoById={cardInfoById}
               revealCards={revealCards(3)}
+              onZoneClick={resolveZoneClick(3)}
+              onCardClick={resolveCardClick(3)}
             />
             <FieldZone
               id={2}
@@ -77,6 +104,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
               cards={zoneCards(2)}
               cardInfoById={cardInfoById}
               revealCards={revealCards(2)}
+              onZoneClick={resolveZoneClick(2)}
+              onCardClick={resolveCardClick(2)}
             />
             <FieldZone
               id={1}
@@ -84,6 +113,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
               cards={zoneCards(1)}
               cardInfoById={cardInfoById}
               revealCards={revealCards(1)}
+              onZoneClick={resolveZoneClick(1)}
+              onCardClick={resolveCardClick(1)}
             />
           </div>
           <FieldZone
@@ -93,6 +124,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             cards={zoneCards(4)}
             cardInfoById={cardInfoById}
             revealCards={revealCards(4)}
+            onZoneClick={resolveZoneClick(4)}
+            onCardClick={resolveCardClick(4)}
           />
         </div>
 
@@ -103,6 +136,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             cards={zoneCards(7)}
             cardInfoById={cardInfoById}
             revealCards={revealCards(7)}
+            onZoneClick={resolveZoneClick(7)}
+            onCardClick={resolveCardClick(7)}
           />
           <FieldZone
             id={5}
@@ -110,6 +145,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             cards={zoneCards(5)}
             cardInfoById={cardInfoById}
             revealCards={revealCards(5)}
+            onZoneClick={resolveZoneClick(5)}
+            onCardClick={resolveCardClick(5)}
           />
           <FieldZone
             id={6}
@@ -117,6 +154,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             cards={zoneCards(6)}
             cardInfoById={cardInfoById}
             revealCards={revealCards(6)}
+            onZoneClick={resolveZoneClick(6)}
+            onCardClick={resolveCardClick(6)}
           />
         </div>
       </div>

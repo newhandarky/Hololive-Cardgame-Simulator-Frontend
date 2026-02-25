@@ -204,6 +204,14 @@ export interface ZoneCardInstance {
   positionIndex: number;
   ownerUserId: number;
   faceDown: boolean;
+  stackDepth?: number;
+  stackCardInstanceIds?: number[];
+  currentHp?: number | null;
+  maxHp?: number | null;
+  damageTaken?: number | null;
+  cheerCount?: number | null;
+  cheerColorCounts?: Record<string, number> | null;
+  attachedSupportCount?: number | null;
 }
 
 export interface BoardZoneState {
@@ -229,6 +237,12 @@ export interface PendingDecisionCandidate {
   cardType?: string;
   levelType?: string;
   zone?: string;
+  imageUrl?: string;
+  currentHp?: number | null;
+  maxHp?: number | null;
+  damageTaken?: number | null;
+  cheerCount?: number | null;
+  cheerColorCounts?: Record<string, number> | null;
 }
 
 export interface PendingDecision {
@@ -245,6 +259,22 @@ export interface PendingDecision {
   candidates: PendingDecisionCandidate[];
 }
 
+export interface PendingInteraction {
+  interactionId: number;
+  interactionType: string;
+  sourceActionType: string;
+  sourceCardInstanceId?: number | null;
+  sourceCardId?: string | null;
+  effectType: string;
+  minSelect: number;
+  maxSelect: number;
+  targetHolomemCardInstanceId?: number | null;
+  title?: string | null;
+  message?: string | null;
+  createdAt: string;
+  cards: PendingDecisionCandidate[];
+}
+
 export interface GameState {
   matchId: number;
   roomCode: string;
@@ -255,6 +285,7 @@ export interface GameState {
   players: PlayerZoneState[];
   recentActions: RecentMatchAction[];
   pendingDecisions: PendingDecision[];
+  pendingInteractions: PendingInteraction[];
 }
 
 export interface PlayToStageActionRequest {
@@ -266,6 +297,11 @@ export interface PlaySupportActionRequest {
   cardInstanceId: number;
   targetHolomemCardInstanceId?: number | null;
   selectedCardInstanceIds?: number[];
+}
+
+export interface BloomActionRequest {
+  bloomCardInstanceId: number;
+  targetHolomemCardInstanceId: number;
 }
 
 export interface AttachCheerActionRequest {
@@ -280,7 +316,12 @@ export interface AttackArtActionRequest {
 
 export interface ResolveDecisionActionRequest {
   decisionId: number;
-  selectedCardInstanceIds: number[];
+  selectedCardInstanceIds?: number[];
+}
+
+export interface MoveStageHolomemActionRequest {
+  cardInstanceId: number;
+  targetZone: 'CENTER' | 'COLLAB';
 }
 
 export interface AdminCreateCardRequest {
@@ -381,6 +422,11 @@ export const playSupport = async (matchId: number, payload: PlaySupportActionReq
   return response.data;
 };
 
+export const bloom = async (matchId: number, payload: BloomActionRequest): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/bloom`, payload);
+  return response.data;
+};
+
 export const attachCheer = async (matchId: number, payload: AttachCheerActionRequest): Promise<LobbyMatch> => {
   const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/attach-cheer`, payload);
   return response.data;
@@ -388,6 +434,24 @@ export const attachCheer = async (matchId: number, payload: AttachCheerActionReq
 
 export const attackArt = async (matchId: number, payload: AttackArtActionRequest): Promise<LobbyMatch> => {
   const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/attack-art`, payload);
+  return response.data;
+};
+
+export const drawTurn = async (matchId: number): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/draw-turn`);
+  return response.data;
+};
+
+export const sendTurnCheer = async (matchId: number): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/send-turn-cheer`);
+  return response.data;
+};
+
+export const moveStageHolomem = async (
+  matchId: number,
+  payload: MoveStageHolomemActionRequest,
+): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/move-stage-holomem`, payload);
   return response.data;
 };
 

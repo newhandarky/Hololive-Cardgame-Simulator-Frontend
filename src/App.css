@@ -918,13 +918,55 @@ select {
 }
 
 .field-zone__card {
+  position: relative;
   margin: 0;
   width: min(144px, 100%);
   height: 100%;
   max-height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.field-zone--clickable {
+  cursor: pointer;
+}
+
+.field-zone__card--clickable {
+  cursor: pointer;
+}
+
+.field-zone__badge {
+  position: absolute;
+  right: 4px;
+  z-index: 2;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(16, 24, 46, 0.92);
+}
+
+.field-zone__badge--stack {
+  top: 4px;
+}
+
+.field-zone__badge--cheer {
+  top: 24px;
+}
+
+.field-zone__card-hp {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #ffe79a;
+  line-height: 1.1;
 }
 
 .field-zone__card-name {
@@ -1196,6 +1238,13 @@ select {
   gap: 8px;
 }
 
+.battle-action-modal__effect {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #e8f0ff;
+  white-space: pre-wrap;
+}
+
 .battle-action-modal__controls label {
   display: grid;
   gap: 6px;
@@ -1207,6 +1256,47 @@ select {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.battle-interaction-modal__cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.battle-interaction-modal__card {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  border: 1px solid rgba(183, 196, 227, 0.35);
+  border-radius: 10px;
+  background: rgba(13, 22, 40, 0.75);
+  padding: 8px;
+}
+
+.battle-interaction-modal__card.is-selected {
+  border-color: #ffe48a;
+  box-shadow: 0 0 0 2px rgba(255, 228, 138, 0.3);
+}
+
+.battle-interaction-modal__card figcaption {
+  font-size: 0.76rem;
+  color: #e6efff;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.battle-candidate-meta {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+}
+
+.battle-candidate-meta__line {
+  font-size: 0.72rem;
+  color: #d6e6ff;
+  line-height: 1.2;
 }
 
 @media (max-width: 1100px) {

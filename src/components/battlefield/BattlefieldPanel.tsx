@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { ZONE_LEGEND, ZONE_META } from '../../types/battlefield';
-import type { GameState, PlayerZoneState } from '../../services/api';
+import type { GameState, PlayerZoneState, ZoneCardInstance } from '../../services/api';
 import { PlayerBattlefield } from './PlayerBattlefield';
 import type { ZoneCardVisualInfo } from './FieldZone';
 
@@ -11,6 +11,8 @@ interface BattlefieldPanelProps {
   currentUserId: number | null;
   gameState: GameState | null;
   cardInfoById: Record<string, ZoneCardVisualInfo>;
+  onMyZoneClick?: (zoneId: number) => void;
+  onMyZoneCardClick?: (zoneId: number, card: ZoneCardInstance) => void;
 }
 
 // 對戰場地總面板：上方顯示對手（反向布局），下方顯示我方
@@ -21,6 +23,8 @@ export const BattlefieldPanel: FC<BattlefieldPanelProps> = ({
   currentUserId,
   gameState,
   cardInfoById,
+  onMyZoneClick,
+  onMyZoneCardClick,
 }) => {
   const myState: PlayerZoneState | null = gameState?.players.find((player) => player.userId === currentUserId) ?? null;
   const opponentState: PlayerZoneState | null = gameState?.players.find(
@@ -40,7 +44,14 @@ export const BattlefieldPanel: FC<BattlefieldPanelProps> = ({
                 zoneState={opponentState}
                 cardInfoById={cardInfoById}
               />
-              <PlayerBattlefield playerName={`我方：${myDisplayName}`} zoneState={myState} cardInfoById={cardInfoById} />
+              <PlayerBattlefield
+                playerName={`我方：${myDisplayName}`}
+                zoneState={myState}
+                cardInfoById={cardInfoById}
+                interactive
+                onZoneClick={onMyZoneClick}
+                onZoneCardClick={onMyZoneCardClick}
+              />
             </div>
           </div>
 

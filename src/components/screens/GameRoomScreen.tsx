@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { BattlefieldPanel } from '../battlefield/BattlefieldPanel';
-import { getCardDetail, type PlaySupportActionRequest } from '../../services/api';
+import { getCardDetail, type CardDetail, type PlaySupportActionRequest } from '../../services/api';
 import type {
   AttachCheerActionRequest,
   AttackArtActionRequest,
+  BloomActionRequest,
   GameState,
   LobbyMatch,
+  MoveStageHolomemActionRequest,
   PendingDecision,
+  PendingDecisionCandidate,
+  PendingInteraction,
   RecentMatchAction,
   PlayToStageActionRequest,
   ResolveDecisionActionRequest,
@@ -24,14 +28,18 @@ interface GameRoomScreenProps {
   busy: boolean;
   onPlayToStage: (payload: PlayToStageActionRequest) => Promise<void>;
   onPlaySupport: (payload: PlaySupportActionRequest) => Promise<void>;
+  onBloom: (payload: BloomActionRequest) => Promise<void>;
   onAttachCheer: (payload: AttachCheerActionRequest) => Promise<void>;
   onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
+  onDrawTurn: () => Promise<void>;
+  onSendTurnCheer: () => Promise<void>;
+  onMoveStageHolomem: (payload: MoveStageHolomemActionRequest) => Promise<void>;
   onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onBackToLobby: () => void;
 }
 
-type HandActionKind = 'PLAY_TO_STAGE' | 'PLAY_SUPPORT' | 'ATTACH_CHEER';
+type HandActionKind = 'PLAY_TO_STAGE' | 'PLAY_SUPPORT' | 'ATTACH_CHEER' | 'BLOOM';
 
 interface HandActionDraft {
   card: ZoneCardInstance;
@@ -42,6 +50,16 @@ interface HandActionDraft {
 
 interface CardVisualExt extends ZoneCardVisualInfo {
   cardType: string;
+  supportEffectText?: string | null;
+  memberEffectText?: string | null;
+  levelType?: string | null;
+}
+
+interface StageMoveDraft {
+  card: ZoneCardInstance;
+  targetZone: 'CENTER' | 'COLLAB';
+  movable: boolean;
+  blockedReason?: string | null;
 }
 
 interface BloomActionSummary {
@@ -90,6 +108,188 @@ const asEffectTypeList = (value: unknown): string[] => {
     .filter((item) => item.length > 0);
 };
 
+const SUPPORT_META_LINE_PATTERNS = [
+  /^カードID[:：]?/i,
+  /^h[a-z0-9-]+$/i,
+  /^カードタイプ[:：]?/i,
+  /^レアリティ[:：]?/i,
+  /^収録商品[:：]?/i,
+  /^MORE$/i,
+];
+
+const sanitizeSupportEffectText = (raw: string, cardName?: string): string | null => {
+  const lines = raw
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const abilityIndex = lines.findIndex((line) => line.includes('能力テキスト'));
+  const effectLines: string[] = [];
+  if (abilityIndex >= 0) {
+    for (let index = abilityIndex + 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (SUPPORT_META_LINE_PATTERNS.some((pattern) => pattern.test(line))) {
+        break;
+      }
+      effectLines.push(line);
+    }
+  } else {
+    for (const line of lines) {
+      if (SUPPORT_META_LINE_PATTERNS.some((pattern) => pattern.test(line))) {
+        continue;
+      }
+      if (cardName && line === cardName.trim()) {
+        continue;
+      }
+      effectLines.push(line);
+    }
+  }
+
+  if (effectLines.length === 0) {
+    return null;
+  }
+  const sections = [cardName?.trim() || '', '能力テキスト', ...effectLines].filter((line) => line.length > 0);
+  return sections.join('\n');
+};
+
+const extractSupportEffectText = (effectJson?: string | null, cardName?: string): string | null => {
+  if (!effectJson || !effectJson.trim()) {
+    return null;
+  }
+
+  const textCandidates: string[] = [];
+  try {
+    const parsed = JSON.parse(effectJson) as Record<string, unknown>;
+    const candidates = [
+      parsed.rawEffect,
+      parsed.rawText,
+      parsed.description,
+      parsed.effect,
+      parsed.keyword,
+      parsed.abilityText,
+      parsed.text,
+    ];
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim()) {
+        textCandidates.push(value.trim());
+      }
+    }
+  } catch {
+    textCandidates.push(effectJson.trim());
+  }
+
+  if (textCandidates.length === 0) {
+    textCandidates.push(effectJson.trim());
+  }
+  for (const candidate of textCandidates) {
+    const sanitized = sanitizeSupportEffectText(candidate, cardName);
+    if (sanitized) {
+      return sanitized;
+    }
+  }
+  return null;
+};
+
+const extractMemberEffectText = (detail: CardDetail): string | null => {
+  const passive = detail.passiveEffectJson?.trim();
+  if (!passive) {
+    return null;
+  }
+  const lines: string[] = [];
+  try {
+    const parsed = JSON.parse(passive) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string' && value.trim()) {
+        lines.push(`${key}：${value.trim()}`);
+      }
+    }
+  } catch {
+    lines.push(passive);
+  }
+  if (lines.length === 0) {
+    return null;
+  }
+  return ['能力テキスト', ...lines].join('\n');
+};
+
+const resolveCheerColorLabel = (color: string): string => {
+  const normalized = color.trim().toUpperCase();
+  switch (normalized) {
+    case 'RED':
+    case '赤':
+      return '紅エール';
+    case 'BLUE':
+    case '青':
+      return '藍エール';
+    case 'YELLOW':
+    case '黄':
+      return '黃エール';
+    case 'GREEN':
+    case '緑':
+      return '綠エール';
+    case 'PURPLE':
+    case '紫':
+      return '紫エール';
+    case 'WHITE':
+    case '白':
+      return '白エール';
+    default:
+      return `${normalized}エール`;
+  }
+};
+
+const resolveCandidateMetaLines = (candidate: PendingDecisionCandidate): string[] => {
+  const lines: string[] = [];
+  if (candidate.maxHp != null) {
+    const resolvedCurrentHp =
+      candidate.currentHp != null
+        ? candidate.currentHp
+        : Math.max(candidate.maxHp - (candidate.damageTaken ?? 0), 0);
+    lines.push(`HP ${resolvedCurrentHp}/${candidate.maxHp}`);
+  }
+  const colorCounts = candidate.cheerColorCounts ?? {};
+  const colorLines = Object.entries(colorCounts)
+    .filter(([, count]) => typeof count === 'number' && count > 0)
+    .sort(([a], [b]) => resolveCheerColorLabel(a).localeCompare(resolveCheerColorLabel(b), 'zh-Hant'))
+    .map(([color, count]) => `${resolveCheerColorLabel(color)} *${count}`);
+  if (colorLines.length > 0) {
+    lines.push(...colorLines);
+  } else if ((candidate.cheerCount ?? 0) > 0) {
+    lines.push(`エール *${candidate.cheerCount}`);
+  }
+  return lines;
+};
+
+const resolveStageZoneLabel = (zone?: string): string => {
+  switch ((zone ?? '').toUpperCase()) {
+    case 'CENTER':
+      return 'CENTER';
+    case 'COLLAB':
+      return 'COLLAB';
+    case 'BACK':
+      return 'BACK';
+    default:
+      return zone ?? '-';
+  }
+};
+
+const levelRank = (level?: string | null): number => {
+  switch ((level ?? '').toUpperCase()) {
+    case 'DEBUT':
+      return 0;
+    case 'FIRST':
+      return 1;
+    case 'SECOND':
+      return 2;
+    default:
+      return -1;
+  }
+};
+
 // GameRoom 畫面：進入對戰後聚焦場地與視覺化操作
 export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   currentMatch,
@@ -101,8 +301,12 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   busy,
   onPlayToStage,
   onPlaySupport,
+  onBloom,
   onAttachCheer,
   onAttackArt,
+  onDrawTurn,
+  onSendTurnCheer,
+  onMoveStageHolomem,
   onResolveDecision,
   onEndTurn,
   onBackToLobby,
@@ -140,6 +344,8 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
 
   const pendingDecisions = currentGameState?.pendingDecisions ?? [];
   const activePendingDecision: PendingDecision | null = pendingDecisions[0] ?? null;
+  const pendingInteractions = currentGameState?.pendingInteractions ?? [];
+  const activePendingInteraction: PendingInteraction | null = pendingInteractions[0] ?? null;
 
   const allKnownCards = useMemo(() => {
     return [
@@ -157,8 +363,12 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       .flatMap((decision) => decision.candidates)
       .map((candidate) => candidate.cardId)
       .filter((cardId): cardId is string => Boolean(cardId));
-    return Array.from(new Set([...cardIds, ...pendingCardIds]));
-  }, [allKnownCards, pendingDecisions]);
+    const pendingInteractionCardIds = pendingInteractions
+      .flatMap((interaction) => interaction.cards)
+      .map((candidate) => candidate.cardId)
+      .filter((cardId): cardId is string => Boolean(cardId));
+    return Array.from(new Set([...cardIds, ...pendingCardIds, ...pendingInteractionCardIds]));
+  }, [allKnownCards, pendingDecisions, pendingInteractions]);
 
   const [cardInfoById, setCardInfoById] = useState<Record<string, CardVisualExt>>({});
   const loadingCardIdsRef = useRef<Set<string>>(new Set());
@@ -188,6 +398,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
               name: detail.name || '卡片',
               imageUrl: detail.imageUrl ?? preferredVariantImage,
               cardType: detail.cardType,
+              supportEffectText: extractSupportEffectText(detail.supportEffectJson, detail.name),
+              memberEffectText: extractMemberEffectText(detail),
+              levelType: detail.levelType ?? null,
             } satisfies CardVisualExt,
           ] as const;
         } catch {
@@ -228,11 +441,18 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const [attackerCardInstanceId, setAttackerCardInstanceId] = useState<number | null>(null);
   const [attackTargetCardInstanceId, setAttackTargetCardInstanceId] = useState<number | null>(null);
   const [pendingHandAction, setPendingHandAction] = useState<HandActionDraft | null>(null);
+  const [pendingStageMove, setPendingStageMove] = useState<StageMoveDraft | null>(null);
+  const [infoModalMessage, setInfoModalMessage] = useState<string | null>(null);
   const [selectedDecisionCardInstanceIds, setSelectedDecisionCardInstanceIds] = useState<number[]>([]);
+  const [selectedInteractionCardInstanceIds, setSelectedInteractionCardInstanceIds] = useState<number[]>([]);
 
   useEffect(() => {
     setSelectedDecisionCardInstanceIds([]);
   }, [activePendingDecision?.decisionId]);
+
+  useEffect(() => {
+    setSelectedInteractionCardInstanceIds([]);
+  }, [activePendingInteraction?.interactionId]);
 
   useEffect(() => {
     if (!myCenterHolomems.some((card) => card.cardInstanceId === attackerCardInstanceId)) {
@@ -246,7 +466,32 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     }
   }, [attackTargetCardInstanceId, opponentTargets]);
 
-  const canSubmitAction = !busy && isMyTurn && currentGameState?.status === 'STARTED' && !activePendingDecision;
+  const recentActions = currentGameState?.recentActions ?? [];
+
+  const canSubmitAction =
+    !busy &&
+    isMyTurn &&
+    currentGameState?.status === 'STARTED' &&
+    !activePendingDecision &&
+    !activePendingInteraction;
+
+  const myCollabHolomems = useMemo(() => {
+    return myBoardZones.find((zone) => zone.zone === 'COLLAB')?.cards ?? [];
+  }, [myBoardZones]);
+
+  const myTurnActions = useMemo(() => {
+    if (currentUserId == null || !currentGameState?.turnNumber) {
+      return [];
+    }
+    return recentActions.filter(
+      (action) => action.userId === currentUserId && action.turnNumber === currentGameState.turnNumber,
+    );
+  }, [recentActions, currentUserId, currentGameState?.turnNumber]);
+  const hasUsedTurnDraw = useMemo(() => myTurnActions.some((action) => action.actionType === 'DRAW_TURN'), [myTurnActions]);
+  const hasUsedTurnCheer = useMemo(
+    () => myTurnActions.some((action) => action.actionType === 'TURN_CHEER'),
+    [myTurnActions],
+  );
 
   const cardName = (card: ZoneCardInstance): string => {
     return cardInfoById[card.cardId]?.name ?? '卡片';
@@ -274,7 +519,14 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const resolveDefaultHandAction = (card: ZoneCardInstance): HandActionKind | null => {
     const type = cardType(card);
     if (type === 'MEMBER') {
-      return 'PLAY_TO_STAGE';
+      const level = (cardInfoById[card.cardId]?.levelType ?? '').toUpperCase();
+      if (level === 'FIRST' || level === 'SECOND') {
+        return 'BLOOM';
+      }
+      if (level === 'DEBUT' || level === 'SPOT' || level === 'BUZZ') {
+        return 'PLAY_TO_STAGE';
+      }
+      return null;
     }
     if (type === 'SUPPORT') {
       return 'PLAY_SUPPORT';
@@ -285,17 +537,50 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     return null;
   };
 
+  const resolveBloomTargets = (bloomCard: ZoneCardInstance): ZoneCardInstance[] => {
+    const bloomInfo = cardInfoById[bloomCard.cardId];
+    const bloomName = (bloomInfo?.name ?? '').trim();
+    const bloomLevel = bloomInfo?.levelType;
+    if (!bloomName || !bloomLevel) {
+      return [];
+    }
+    const bloomRank = levelRank(bloomLevel);
+    if (bloomRank <= 0) {
+      return [];
+    }
+    return myHolomems.filter((target) => {
+      const targetInfo = cardInfoById[target.cardId];
+      const targetName = (targetInfo?.name ?? '').trim();
+      const targetLevel = targetInfo?.levelType;
+      if (!targetName || !targetLevel) {
+        return false;
+      }
+      return targetName === bloomName && levelRank(targetLevel) >= 0 && levelRank(targetLevel) < bloomRank;
+    });
+  };
+
   const openHandAction = (card: ZoneCardInstance) => {
     const defaultKind = resolveDefaultHandAction(card);
     if (!defaultKind) {
       return;
     }
 
+    const bloomTargets = defaultKind === 'BLOOM' ? resolveBloomTargets(card) : [];
+    if (defaultKind === 'BLOOM' && bloomTargets.length === 0) {
+      setInfoModalMessage('目前沒有可執行 BLOOM 的對象。');
+      return;
+    }
+
     setPendingHandAction({
       card,
       kind: defaultKind,
-      targetZone: 'CENTER',
-      targetHolomemCardInstanceId: defaultKind === 'ATTACH_CHEER' ? (myHolomems[0]?.cardInstanceId ?? null) : null,
+      targetZone: 'BACK',
+      targetHolomemCardInstanceId:
+        defaultKind === 'ATTACH_CHEER'
+          ? (myHolomems[0]?.cardInstanceId ?? null)
+          : defaultKind === 'BLOOM'
+            ? (bloomTargets[0]?.cardInstanceId ?? null)
+            : null,
     });
   };
 
@@ -311,6 +596,36 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       })),
     ];
   }, [myHolomems, opponentTargets, cardInfoById]);
+
+  const summarizeCheerColors = (card: ZoneCardInstance): string => {
+    const colorCounts = card.cheerColorCounts ?? {};
+    const parts = Object.entries(colorCounts)
+      .filter(([, count]) => typeof count === 'number' && count > 0)
+      .sort(([a], [b]) => resolveCheerColorLabel(a).localeCompare(resolveCheerColorLabel(b), 'zh-Hant'))
+      .map(([color, count]) => `${resolveCheerColorLabel(color)}*${count}`);
+    if (parts.length > 0) {
+      return parts.join(' / ');
+    }
+    const cheerCount = card.cheerCount ?? 0;
+    return cheerCount > 0 ? `エール*${cheerCount}` : 'エール*0';
+  };
+
+  const formatBloomTargetLabel = (target: ZoneCardInstance): string => {
+    const zoneLabel = resolveStageZoneLabel(target.zone);
+    const hp =
+      target.maxHp != null
+        ? `${target.currentHp ?? Math.max(target.maxHp - (target.damageTaken ?? 0), 0)}/${target.maxHp}`
+        : '-';
+    const supportCount = target.attachedSupportCount ?? 0;
+    return `${cardName(target)} [${zoneLabel}] HP ${hp} / ${summarizeCheerColors(target)} / 裝備*${supportCount}`;
+  };
+
+  const bloomTargetOptions = useMemo(() => {
+    if (!pendingHandAction || pendingHandAction.kind !== 'BLOOM') {
+      return [];
+    }
+    return resolveBloomTargets(pendingHandAction.card);
+  }, [pendingHandAction, myHolomems, cardInfoById]);
 
   const confirmHandAction = async () => {
     if (!pendingHandAction || !canSubmitAction) {
@@ -338,6 +653,18 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       return;
     }
 
+    if (pendingHandAction.kind === 'BLOOM') {
+      if (pendingHandAction.targetHolomemCardInstanceId == null) {
+        return;
+      }
+      await onBloom({
+        bloomCardInstanceId: pendingHandAction.card.cardInstanceId,
+        targetHolomemCardInstanceId: pendingHandAction.targetHolomemCardInstanceId,
+      });
+      setPendingHandAction(null);
+      return;
+    }
+
     if (pendingHandAction.kind === 'ATTACH_CHEER') {
       if (pendingHandAction.targetHolomemCardInstanceId == null) {
         return;
@@ -350,6 +677,63 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     }
   };
 
+  const handleMyZoneClick = async (zoneId: number) => {
+    if (!canSubmitAction) {
+      setInfoModalMessage('目前有待處理互動，請先完成確認。');
+      return;
+    }
+
+    if (zoneId === 5) {
+      if (hasUsedTurnDraw) {
+        setInfoModalMessage('這回合你已經抽過卡了。');
+        return;
+      }
+      await onDrawTurn();
+      return;
+    }
+
+    if (zoneId === 8) {
+      if (hasUsedTurnCheer) {
+        setInfoModalMessage('這回合你已經發送過吶喊了。');
+        return;
+      }
+      await onSendTurnCheer();
+    }
+  };
+
+  const handleMyZoneCardClick = (zoneId: number, card: ZoneCardInstance) => {
+    if (!canSubmitAction) {
+      setInfoModalMessage('目前有待處理互動，請先完成確認。');
+      return;
+    }
+    if (zoneId !== 4) {
+      return;
+    }
+    if (cardType(card) !== 'MEMBER') {
+      return;
+    }
+
+    const centerAvailable = myCenterHolomems.length === 0;
+    const collabAvailable = myCollabHolomems.length === 0;
+    setPendingStageMove({
+      card,
+      targetZone: centerAvailable ? 'CENTER' : 'COLLAB',
+      movable: centerAvailable || collabAvailable,
+      blockedReason: centerAvailable || collabAvailable ? null : 'CENTER 與 COLLAB 都已有 Holomem，目前僅可查看卡片效果。',
+    });
+  };
+
+  const confirmStageMove = async () => {
+    if (!pendingStageMove || !canSubmitAction || !pendingStageMove.movable) {
+      return;
+    }
+    await onMoveStageHolomem({
+      cardInstanceId: pendingStageMove.card.cardInstanceId,
+      targetZone: pendingStageMove.targetZone,
+    });
+    setPendingStageMove(null);
+  };
+
   const actionTitle = (kind: HandActionKind): string => {
     switch (kind) {
       case 'PLAY_TO_STAGE':
@@ -358,6 +742,8 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         return '發動 Support 效果';
       case 'ATTACH_CHEER':
         return '附加 Cheer';
+      case 'BLOOM':
+        return '執行 BLOOM';
       default:
         return kind;
     }
@@ -366,9 +752,34 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const canConfirmHandAction =
     !!pendingHandAction &&
     canSubmitAction &&
-    (pendingHandAction.kind !== 'ATTACH_CHEER' || pendingHandAction.targetHolomemCardInstanceId != null);
+    (
+      (pendingHandAction.kind !== 'ATTACH_CHEER' && pendingHandAction.kind !== 'BLOOM') ||
+      pendingHandAction.targetHolomemCardInstanceId != null
+    );
 
-  const recentActions = currentGameState?.recentActions ?? [];
+  const canPerformTurnCheer = useMemo(() => {
+    const hasCheerInDeck = (myState?.cheerDeckCount ?? 0) > 0;
+    const hasHolomemOnStage = myHolomems.length > 0;
+    return hasCheerInDeck && hasHolomemOnStage;
+  }, [myState?.cheerDeckCount, myHolomems.length]);
+
+  const handleEndTurnClick = async () => {
+    if (busy || !isMyTurn) {
+      return;
+    }
+    const missing: string[] = [];
+    if (!hasUsedTurnDraw) {
+      missing.push('抽卡');
+    }
+    if (canPerformTurnCheer && !hasUsedTurnCheer) {
+      missing.push('發送吶喊');
+    }
+    if (missing.length > 0) {
+      setInfoModalMessage(`回合尚未完成：${missing.join('、')}。請先完成後再結束回合。`);
+      return;
+    }
+    await onEndTurn();
+  };
 
   const toggleDecisionSelection = (cardInstanceId: number) => {
     if (!activePendingDecision || busy) {
@@ -391,6 +802,44 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     !busy &&
     selectedDecisionCardInstanceIds.length >= Math.max(activePendingDecision.minSelect, 1) &&
     selectedDecisionCardInstanceIds.length <= activePendingDecision.maxSelect;
+
+  const toggleInteractionSelection = (cardInstanceId: number) => {
+    if (!activePendingInteraction || busy) {
+      return;
+    }
+    if (activePendingInteraction.interactionType !== 'SEND_CHEER') {
+      return;
+    }
+    setSelectedInteractionCardInstanceIds((previous) => {
+      const exists = previous.includes(cardInstanceId);
+      if (exists) {
+        return previous.filter((value) => value !== cardInstanceId);
+      }
+      if (previous.length >= activePendingInteraction.maxSelect) {
+        return previous;
+      }
+      return [...previous, cardInstanceId];
+    });
+  };
+
+  const canConfirmInteraction = useMemo(() => {
+    if (!activePendingInteraction || busy) {
+      return false;
+    }
+    if (activePendingInteraction.interactionType === 'TURN_START') {
+      return true;
+    }
+    if (activePendingInteraction.interactionType === 'DRAW_REVEAL') {
+      return true;
+    }
+    if (activePendingInteraction.interactionType === 'SEND_CHEER') {
+      return (
+        selectedInteractionCardInstanceIds.length >= Math.max(activePendingInteraction.minSelect, 1) &&
+        selectedInteractionCardInstanceIds.length <= activePendingInteraction.maxSelect
+      );
+    }
+    return false;
+  }, [activePendingInteraction, busy, selectedInteractionCardInstanceIds]);
 
   const actionActorLabel = (action: RecentMatchAction): string => {
     if (currentUserId == null) {
@@ -433,7 +882,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         </div>
 
         <div className="screen-header__actions">
-          <button type="button" onClick={() => void onEndTurn()} disabled={busy || !isMyTurn}>
+          <button type="button" onClick={() => void handleEndTurnClick()} disabled={busy || !isMyTurn}>
             End Turn
           </button>
           <button type="button" onClick={onBackToLobby}>
@@ -449,10 +898,17 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         currentUserId={currentUserId}
         gameState={currentGameState}
         cardInfoById={cardInfoById}
+        onMyZoneClick={(zoneId) => {
+          void handleMyZoneClick(zoneId);
+        }}
+        onMyZoneCardClick={handleMyZoneCardClick}
       />
 
       <section className="panel battle-ops-panel">
         <h2>手牌與操作</h2>
+        {activePendingInteraction ? (
+          <p className="battle-ops-panel__hint">目前有待確認互動，請先完成彈窗確認。</p>
+        ) : null}
         {activePendingDecision ? (
           <p className="battle-ops-panel__hint">目前有待處理效果，請先完成下方「效果選擇」。</p>
         ) : null}
@@ -553,6 +1009,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
             {activePendingDecision.candidates.map((candidate) => {
               const selected = selectedDecisionCardInstanceIds.includes(candidate.cardInstanceId);
               const info = cardInfoById[candidate.cardId];
+              const metaLines = resolveCandidateMetaLines(candidate);
               return (
                 <button
                   key={candidate.cardInstanceId}
@@ -573,7 +1030,17 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                     </div>
                   )}
                   <span className="hand-card__name">{candidate.name ?? info?.name ?? candidate.cardId}</span>
-                  <span className="hand-card__meta">#{candidate.cardInstanceId}</span>
+                  {metaLines.length > 0 ? (
+                    <span className="battle-candidate-meta">
+                      {metaLines.map((line) => (
+                        <span key={`${candidate.cardInstanceId}-${line}`} className="battle-candidate-meta__line">
+                          {line}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="hand-card__meta">可選目標</span>
+                  )}
                 </button>
               );
             })}
@@ -667,10 +1134,19 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
 
             {pendingHandAction.kind === 'PLAY_TO_STAGE' ? (
               <div className="battle-action-modal__controls">
+                <p>此操作會先將 Holomen 放置到 BACK（區塊 4）。</p>
+              </div>
+            ) : null}
+
+            {pendingHandAction.kind === 'BLOOM' ? (
+              <div className="battle-action-modal__controls">
+                {cardInfoById[pendingHandAction.card.cardId]?.memberEffectText ? (
+                  <p className="battle-action-modal__effect">{cardInfoById[pendingHandAction.card.cardId]?.memberEffectText}</p>
+                ) : null}
                 <label>
-                  目標區位
+                  BLOOM 目標
                   <select
-                    value={pendingHandAction.targetZone}
+                    value={pendingHandAction.targetHolomemCardInstanceId ?? ''}
                     onChange={(event) =>
                       setPendingHandAction((previous) => {
                         if (!previous) {
@@ -678,15 +1154,20 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                         }
                         return {
                           ...previous,
-                          targetZone: event.target.value === 'BACK' ? 'BACK' : 'CENTER',
+                          targetHolomemCardInstanceId: event.target.value ? Number(event.target.value) : null,
                         };
                       })
                     }
                   >
-                    <option value="CENTER">CENTER</option>
-                    <option value="BACK">BACK</option>
+                    <option value="">選擇要 BLOOM 的 Holomem</option>
+                    {bloomTargetOptions.map((target) => (
+                      <option key={target.cardInstanceId} value={target.cardInstanceId}>
+                        {formatBloomTargetLabel(target)}
+                      </option>
+                    ))}
                   </select>
                 </label>
+                <p className="battle-action-modal__effect">BLOOM 後會繼承目標目前附加的エール與裝備狀態。</p>
               </div>
             ) : null}
 
@@ -721,6 +1202,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
 
             {pendingHandAction.kind === 'PLAY_SUPPORT' ? (
               <div className="battle-action-modal__controls">
+                {cardInfoById[pendingHandAction.card.cardId]?.supportEffectText ? (
+                  <p className="battle-action-modal__effect">{cardInfoById[pendingHandAction.card.cardId]?.supportEffectText}</p>
+                ) : null}
                 <label>
                   目標 Holomen（可選）
                   <select
@@ -754,6 +1238,158 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
               </button>
               <button type="button" disabled={!canConfirmHandAction} onClick={() => void confirmHandAction()}>
                 確認執行
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {pendingStageMove ? (
+        <section className="battle-action-modal" role="dialog" aria-modal="true">
+          <button type="button" className="battle-action-modal__backdrop" aria-label="移動 Holomem 背景" />
+          <div className="battle-action-modal__panel">
+            <h3>移動場上 Holomen</h3>
+            <p>{pendingStageMove.movable ? '選擇要移動到 CENTER 或 COLLAB。' : '目前無法移動，僅可查看卡片效果。'}</p>
+
+            <div className="battle-action-modal__card">
+              {cardInfoById[pendingStageMove.card.cardId]?.imageUrl ? (
+                <img
+                  className="card-visual card-visual--front"
+                  src={cardInfoById[pendingStageMove.card.cardId]?.imageUrl ?? ''}
+                  alt={cardName(pendingStageMove.card)}
+                />
+              ) : (
+                <div className="card-visual card-visual--placeholder">
+                  <span>{cardName(pendingStageMove.card)}</span>
+                </div>
+              )}
+              <div>
+                <strong>{cardName(pendingStageMove.card)}</strong>
+                <p>{cardTypeLabel(cardType(pendingStageMove.card))}</p>
+              </div>
+            </div>
+
+            {cardInfoById[pendingStageMove.card.cardId]?.memberEffectText ? (
+              <p className="battle-action-modal__effect">{cardInfoById[pendingStageMove.card.cardId]?.memberEffectText}</p>
+            ) : null}
+            {pendingStageMove.blockedReason ? (
+              <p className="battle-action-modal__effect">{pendingStageMove.blockedReason}</p>
+            ) : null}
+
+            <div className="battle-action-modal__controls">
+              <label>
+                目標區位
+                <select
+                  value={pendingStageMove.targetZone}
+                  disabled={!pendingStageMove.movable}
+                  onChange={(event) =>
+                    setPendingStageMove((previous) => {
+                      if (!previous) {
+                        return previous;
+                      }
+                      const target = event.target.value === 'COLLAB' ? 'COLLAB' : 'CENTER';
+                      return { ...previous, targetZone: target };
+                    })
+                  }
+                >
+                  {!pendingStageMove.movable ? (
+                    <option value={pendingStageMove.targetZone}>{pendingStageMove.targetZone}</option>
+                  ) : null}
+                  {myCenterHolomems.length === 0 ? <option value="CENTER">CENTER</option> : null}
+                  {myCollabHolomems.length === 0 ? <option value="COLLAB">COLLAB</option> : null}
+                </select>
+              </label>
+            </div>
+
+            <div className="battle-action-modal__actions">
+              <button type="button" onClick={() => setPendingStageMove(null)}>
+                取消
+              </button>
+              <button type="button" disabled={!canSubmitAction || !pendingStageMove.movable} onClick={() => void confirmStageMove()}>
+                確認移動
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {infoModalMessage ? (
+        <section className="battle-action-modal" role="dialog" aria-modal="true">
+          <button type="button" className="battle-action-modal__backdrop" aria-label="提示背景" />
+          <div className="battle-action-modal__panel">
+            <h3>提示</h3>
+            <p>{infoModalMessage}</p>
+            <div className="battle-action-modal__actions">
+              <button type="button" onClick={() => setInfoModalMessage(null)}>
+                確認
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activePendingInteraction ? (
+        <section className="battle-action-modal" role="dialog" aria-modal="true">
+          <button type="button" className="battle-action-modal__backdrop" aria-label="待確認互動背景" />
+          <div className="battle-action-modal__panel">
+            <h3>{activePendingInteraction.title ?? '待確認互動'}</h3>
+            <p>{activePendingInteraction.message ?? '請確認後繼續。'}</p>
+
+            <div className="battle-interaction-modal__cards">
+              {activePendingInteraction.cards.map((card) => {
+                const info = cardInfoById[card.cardId];
+                const imageUrl = card.imageUrl ?? info?.imageUrl ?? null;
+                const name = card.name ?? info?.name ?? card.cardId;
+                const selectable = activePendingInteraction.interactionType === 'SEND_CHEER';
+                const selected = selectedInteractionCardInstanceIds.includes(card.cardInstanceId);
+                const metaLines = resolveCandidateMetaLines(card);
+                const zoneLabel = resolveStageZoneLabel(card.zone);
+                return (
+                  <button
+                    key={card.cardInstanceId}
+                    type="button"
+                    className={`battle-interaction-modal__card${selected ? ' is-selected' : ''}`}
+                    disabled={!selectable || busy}
+                    onClick={() => toggleInteractionSelection(card.cardInstanceId)}
+                  >
+                    {imageUrl ? (
+                      <img className="card-visual card-visual--front" src={imageUrl} alt={name} loading="lazy" />
+                    ) : (
+                      <div className="card-visual card-visual--placeholder">
+                        <span>{name}</span>
+                      </div>
+                    )}
+                    <figcaption>{name}</figcaption>
+                    <span className="battle-candidate-meta__line">區位：{zoneLabel}</span>
+                    {metaLines.length > 0 ? (
+                      <div className="battle-candidate-meta">
+                        {metaLines.map((line) => (
+                          <span key={`${card.cardInstanceId}-${line}`} className="battle-candidate-meta__line">
+                            {line}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="battle-action-modal__actions">
+              <button
+                type="button"
+                disabled={!canConfirmInteraction}
+                onClick={() =>
+                  void onResolveDecision({
+                    decisionId: activePendingInteraction.interactionId,
+                    selectedCardInstanceIds:
+                      activePendingInteraction.interactionType === 'SEND_CHEER'
+                        ? selectedInteractionCardInstanceIds
+                        : [],
+                  })
+                }
+              >
+                確認
               </button>
             </div>
           </div>
