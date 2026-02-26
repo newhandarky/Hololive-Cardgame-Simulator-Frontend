@@ -16,6 +16,7 @@ import {
   concede,
   createBackgroundAsset,
   createMatch,
+  createVsHardNpcMatch,
   drawTurn,
   endTurn,
   getBackgroundAssets,
@@ -736,6 +737,24 @@ const App: FC = () => {
     }
   };
 
+  const handleCreateHardNpcRoom = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => createVsHardNpcMatch());
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+      setRoomCodeInput(match.roomCode);
+      navigate(`/game-room/${match.matchId}`, { replace: true });
+    } catch (err) {
+      setError(getApiErrorMessage(err, '建立 Hard NPC 對戰失敗'));
+      console.error(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+
   const handleSetupQuickDeck = async () => {
     setBusy(true);
     setError(null);
@@ -1068,6 +1087,7 @@ const App: FC = () => {
               onSignInAs={handleSignInAs}
               onSetupQuickDeck={handleSetupQuickDeck}
               onCreateRoom={handleCreateRoom}
+              onCreateHardNpcMatch={handleCreateHardNpcRoom}
               onJoinRoom={handleJoinRoom}
               onToggleReady={handleToggleReady}
               onStartMatch={handleStart}

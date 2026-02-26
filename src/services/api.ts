@@ -413,6 +413,11 @@ export const createMatch = async (): Promise<LobbyMatch> => {
   return response.data;
 };
 
+export const createVsHardNpcMatch = async (): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>('/matches/create-vs-hard-npc');
+  return response.data;
+};
+
 export const joinMatch = async (roomCode: string): Promise<LobbyMatch> => {
   const response = await api.post<LobbyMatch>('/matches/join', { roomCode });
   return response.data;

@@ -27,6 +27,7 @@ interface LobbyScreenProps {
   onSignInAs: () => Promise<void>;
   onSetupQuickDeck: () => Promise<void>;
   onCreateRoom: () => Promise<void>;
+  onCreateHardNpcMatch: () => Promise<void>;
   onJoinRoom: () => Promise<void>;
   onToggleReady: () => Promise<void>;
   onStartMatch: () => Promise<void>;
@@ -66,6 +67,7 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
   onSignInAs,
   onSetupQuickDeck,
   onCreateRoom,
+  onCreateHardNpcMatch,
   onJoinRoom,
   onToggleReady,
   onStartMatch,
@@ -291,6 +293,9 @@ export const LobbyScreen: FC<LobbyScreenProps> = ({
         <div className="row">
           <button type="button" onClick={() => void onCreateRoom()} disabled={busy}>
             Create Room
+          </button>
+          <button type="button" onClick={() => void onCreateHardNpcMatch()} disabled={busy}>
+            NPC 對戰（Hard）
           </button>
           <input
             value={roomCodeInput}
