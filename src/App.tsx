@@ -8,6 +8,7 @@ import { CardAdminPage } from './pages/CardAdminPage';
 import { CardCatalogPage } from './pages/CardCatalogPage';
 import { DeckEditorPage } from './pages/DeckEditorPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { BackgroundGalleryPage } from './pages/BackgroundGalleryPage';
 import {
   activateMyDeck,
   attachCheer,
@@ -1040,6 +1041,10 @@ const App: FC = () => {
     }
   };
 
+  void loadingUsers;
+  void handleSignInAs;
+  void handleSetupQuickDeck;
+
   const handleResolveDecision = async (payload: ResolveDecisionActionRequest) => {
     if (!currentMatch) {
       return;
@@ -1074,9 +1079,7 @@ const App: FC = () => {
               roomCodeInput={roomCodeInput}
               busy={busy}
               wsStatus={wsStatus}
-              loadingUsers={loadingUsers}
               loadingDecks={loadingDecks}
-              users={users}
               decks={myDecks}
               activeDeckId={activeDeck?.id ?? null}
               currentMatch={currentMatch}
@@ -1084,14 +1087,40 @@ const App: FC = () => {
               isHost={isHost}
               onMockLineIdChange={setMockLineId}
               onRoomCodeInputChange={setRoomCodeInput}
-              onSignInAs={handleSignInAs}
-              onSetupQuickDeck={handleSetupQuickDeck}
               onCreateRoom={handleCreateRoom}
               onCreateHardNpcMatch={handleCreateHardNpcRoom}
               onJoinRoom={handleJoinRoom}
               onToggleReady={handleToggleReady}
               onStartMatch={handleStart}
               onSelectDeck={handleSelectDeck}
+            />
+          }
+        />
+        <Route
+          path="/backgrounds/field"
+          element={
+            <BackgroundGalleryPage
+              mode="FIELD"
+              busy={busy}
+              fieldBackgroundUrls={backgroundCustomization.fieldBackgroundUrls}
+              cardAndCheerBackgroundUrls={backgroundCustomization.cardAndCheerBackgroundUrls}
+              selectedFieldBackgroundUrl={backgroundCustomization.selectedFieldBackgroundUrl}
+              selectedCardBackgroundUrl={backgroundCustomization.selectedCardBackgroundUrl}
+              selectedCheerBackgroundUrl={backgroundCustomization.selectedCheerBackgroundUrl}
+              onAddFieldBackgroundUrl={addFieldBackgroundUrl}
+              onAddCardAndCheerBackgroundUrl={addCardAndCheerBackgroundUrl}
+              onSelectFieldBackgroundUrl={selectFieldBackgroundUrl}
+              onSelectCardBackgroundUrl={selectCardBackgroundUrl}
+              onSelectCheerBackgroundUrl={selectCheerBackgroundUrl}
+            />
+          }
+        />
+        <Route
+          path="/backgrounds/card"
+          element={
+            <BackgroundGalleryPage
+              mode="CARD"
+              busy={busy}
               fieldBackgroundUrls={backgroundCustomization.fieldBackgroundUrls}
               cardAndCheerBackgroundUrls={backgroundCustomization.cardAndCheerBackgroundUrls}
               selectedFieldBackgroundUrl={backgroundCustomization.selectedFieldBackgroundUrl}

@@ -5,6 +5,7 @@ import type { ZoneCardInstance } from '../../services/api';
 export interface ZoneCardVisualInfo {
   name: string;
   imageUrl?: string | null;
+  defaultAttack?: number | null;
 }
 
 interface FieldZoneProps {
@@ -16,11 +17,12 @@ interface FieldZoneProps {
   revealCards?: boolean;
   onZoneClick?: () => void;
   onCardClick?: (card: ZoneCardInstance) => void;
+  labelText?: string;
+  hideZoneLabel?: boolean;
 }
 
-const STACK_PREVIEW_ZONE_IDS = new Set<ZoneId>([5, 8, 9]);
+const STACK_PREVIEW_ZONE_IDS = new Set<ZoneId>([5, 7, 8, 9]);
 
-// 單一場地區塊元件：顯示區位名稱、張數與卡片視覺
 export const FieldZone: FC<FieldZoneProps> = ({
   id,
   variant = 'card',
@@ -30,6 +32,8 @@ export const FieldZone: FC<FieldZoneProps> = ({
   revealCards = false,
   onZoneClick,
   onCardClick,
+  labelText,
+  hideZoneLabel = false,
 }) => {
   const meta = ZONE_META[id];
   const previewLimit = STACK_PREVIEW_ZONE_IDS.has(id) ? 1 : id === 4 ? 5 : 3;
@@ -40,13 +44,9 @@ export const FieldZone: FC<FieldZoneProps> = ({
       className={`field-zone field-zone--${variant}${onZoneClick ? ' field-zone--clickable' : ''}`}
       onClick={() => onZoneClick?.()}
     >
-      <span className="field-zone__label">{meta.title}</span>
-      <div className="field-zone__content">
-        <div className="field-zone__header">
-          <p className="field-zone__title">{meta.title}</p>
-          <p className="field-zone__count">目前張數：{count}</p>
-        </div>
+      {!hideZoneLabel ? <span className="field-zone__label">{labelText ?? meta.title}</span> : null}
 
+      <div className="field-zone__content">
         {previewCards.length > 0 ? (
           <div className="field-zone__cards">
             {previewCards.map((card) => {
@@ -56,7 +56,13 @@ export const FieldZone: FC<FieldZoneProps> = ({
               const cheerCount = card.cheerCount ?? 0;
               const hpText =
                 card.currentHp != null && card.maxHp != null ? `${card.currentHp}/${card.maxHp}` : null;
-              const attackText = card.currentAttack != null ? `${card.currentAttack}` : null;
+              const attackValue =
+                card.currentAttack != null && card.currentAttack > 0
+                  ? card.currentAttack
+                  : info?.defaultAttack != null && info.defaultAttack > 0
+                    ? info.defaultAttack
+                    : null;
+              const attackText = attackValue != null ? `${attackValue}` : null;
               const hasBattleStats = hpText != null || attackText != null;
               const content = (
                 <>
@@ -79,7 +85,6 @@ export const FieldZone: FC<FieldZoneProps> = ({
                   {revealCards && cheerCount > 0 ? (
                     <span className="field-zone__badge field-zone__badge--cheer">吶喊 {cheerCount}</span>
                   ) : null}
-                  {revealCards ? <p className="field-zone__card-name">{cardName}</p> : null}
                   {revealCards && hasBattleStats ? (
                     <div className="field-zone__stats-overlay">
                       {hpText ? <p className="field-zone__card-stat-line">HP {hpText}</p> : null}
@@ -112,6 +117,10 @@ export const FieldZone: FC<FieldZoneProps> = ({
               );
             })}
           </div>
+        ) : null}
+
+        {previewCards.length === 0 && (id === 7 || id === 9) ? (
+          <p className="field-zone__count-empty">X{count}</p>
         ) : null}
       </div>
     </article>

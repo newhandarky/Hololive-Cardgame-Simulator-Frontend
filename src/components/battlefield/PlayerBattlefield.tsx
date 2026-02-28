@@ -1,4 +1,4 @@
-import { useMemo, type FC } from 'react';
+import { useMemo, type CSSProperties, type FC } from 'react';
 import type { PlayerZoneState, ZoneCardInstance } from '../../services/api';
 import { BOARD_SLOT_TO_ZONE } from '../../types/battlefield';
 import { FieldZone, type ZoneCardVisualInfo } from './FieldZone';
@@ -11,11 +11,13 @@ interface PlayerBattlefieldProps {
   interactive?: boolean;
   onZoneClick?: (zoneId: number) => void;
   onZoneCardClick?: (zoneId: number, card: ZoneCardInstance) => void;
+  showZoneLabels?: boolean;
+  showHeader?: boolean;
+  customBackgroundUrl?: string | null;
 }
 
-const FACE_DOWN_SLOT_IDS = new Set<number>([5, 8, 9]);
+const FACE_DOWN_SLOT_IDS = new Set<number>([5, 7, 8, 9]);
 
-// 單一玩家場地：依官方示意配置 1~9 區塊
 export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
   playerName,
   zoneState,
@@ -24,6 +26,9 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
   interactive = false,
   onZoneClick,
   onZoneCardClick,
+  showZoneLabels = true,
+  showHeader = true,
+  customBackgroundUrl,
 }) => {
   const boardZoneMap = useMemo(() => {
     const mapping = new Map<string, PlayerZoneState['boardZones'][number]>();
@@ -60,9 +65,31 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
     return (card: ZoneCardInstance) => onZoneCardClick?.(slotId, card);
   };
 
+  const zoneLabel = (slotId: number): string => {
+    if (slotId === 7) {
+      return `ホロパワー X${zoneCount(7, zoneState?.holopowerCount ?? 0)}`;
+    }
+    if (slotId === 9) {
+      return `ライフ X${zoneCount(9, zoneState?.lifeCount ?? 0)}`;
+    }
+    return '';
+  };
+
+  const style = useMemo<CSSProperties | undefined>(() => {
+    if (!customBackgroundUrl) {
+      return undefined;
+    }
+    return {
+      backgroundImage: customBackgroundUrl.startsWith('var(') ? customBackgroundUrl : `url(${customBackgroundUrl})`,
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: 'center',
+      backgroundSize: 'cover',
+    };
+  }, [customBackgroundUrl]);
+
   return (
-    <section className={`player-field ${reversed ? 'player-field--reversed' : ''}`}>
-      <header className="player-field__header">{playerName}</header>
+    <section className={`player-field ${reversed ? 'player-field--reversed' : ''}`} style={style}>
+      {showHeader ? <header className="player-field__header">{playerName}</header> : null}
 
       <div className="player-field__grid">
         <div className="player-field__left-column">
@@ -75,6 +102,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             revealCards={revealCards(9)}
             onZoneClick={resolveZoneClick(9)}
             onCardClick={resolveCardClick(9)}
+            labelText={zoneLabel(9)}
+            hideZoneLabel={!showZoneLabels && zoneCount(9, zoneState?.lifeCount ?? 0) <= 0}
           />
           <FieldZone
             id={8}
@@ -84,6 +113,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             revealCards={revealCards(8)}
             onZoneClick={resolveZoneClick(8)}
             onCardClick={resolveCardClick(8)}
+            hideZoneLabel={!showZoneLabels}
           />
         </div>
 
@@ -97,6 +127,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
               revealCards={revealCards(3)}
               onZoneClick={resolveZoneClick(3)}
               onCardClick={resolveCardClick(3)}
+              hideZoneLabel={!showZoneLabels}
             />
             <FieldZone
               id={2}
@@ -106,6 +137,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
               revealCards={revealCards(2)}
               onZoneClick={resolveZoneClick(2)}
               onCardClick={resolveCardClick(2)}
+              hideZoneLabel={!showZoneLabels}
             />
             <FieldZone
               id={1}
@@ -115,6 +147,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
               revealCards={revealCards(1)}
               onZoneClick={resolveZoneClick(1)}
               onCardClick={resolveCardClick(1)}
+              hideZoneLabel={!showZoneLabels}
             />
           </div>
           <FieldZone
@@ -126,6 +159,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             revealCards={revealCards(4)}
             onZoneClick={resolveZoneClick(4)}
             onCardClick={resolveCardClick(4)}
+            hideZoneLabel={!showZoneLabels}
           />
         </div>
 
@@ -138,6 +172,8 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             revealCards={revealCards(7)}
             onZoneClick={resolveZoneClick(7)}
             onCardClick={resolveCardClick(7)}
+            labelText={zoneLabel(7)}
+            hideZoneLabel={!showZoneLabels && zoneCount(7, zoneState?.holopowerCount ?? 0) <= 0}
           />
           <FieldZone
             id={5}
@@ -147,6 +183,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             revealCards={revealCards(5)}
             onZoneClick={resolveZoneClick(5)}
             onCardClick={resolveCardClick(5)}
+            hideZoneLabel={!showZoneLabels}
           />
           <FieldZone
             id={6}
@@ -156,6 +193,7 @@ export const PlayerBattlefield: FC<PlayerBattlefieldProps> = ({
             revealCards={revealCards(6)}
             onZoneClick={resolveZoneClick(6)}
             onCardClick={resolveCardClick(6)}
+            hideZoneLabel={!showZoneLabels}
           />
         </div>
       </div>

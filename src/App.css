@@ -84,13 +84,12 @@ ul {
 
 .battlefield-panel {
   background:
-    var(--custom-battlefield-image, none),
     radial-gradient(circle at 20% 10%, rgba(97, 220, 255, 0.2), transparent 45%),
     radial-gradient(circle at 85% 18%, rgba(255, 104, 185, 0.24), transparent 45%),
     linear-gradient(155deg, #171d30 20%, #0f1422 100%);
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
-  background-position: center, 20% 10%, 85% 18%, center;
-  background-size: cover, auto, auto, cover;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-position: 20% 10%, 85% 18%, center;
+  background-size: auto, auto, cover;
 }
 
 .battlefield-scroll {
@@ -203,10 +202,6 @@ ul {
   white-space: nowrap;
 }
 
-.player-field--reversed .field-zone__label {
-  transform: translate(-50%, -50%) rotate(180deg);
-}
-
 .field-zone__content {
   height: 100%;
   display: grid;
@@ -255,6 +250,14 @@ ul {
 .battlefield-summary {
   margin: 12px 0 0;
   color: #cde3ff;
+}
+
+
+.field-zone__count-empty {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #fff2af;
 }
 
 .screen-header {
@@ -934,12 +937,13 @@ select {
   color: #6d68a2;
 }
 
-/* Battlefield visual card overrides */
+
 .player-field--reversed .player-field__header,
 .player-field--reversed .field-zone {
   transform: rotate(180deg);
 }
 
+/* Battlefield visual card overrides */
 .player-field__grid {
   grid-template-columns: 180px 1fr 180px;
   min-height: 410px;
@@ -1137,25 +1141,78 @@ select {
   font-size: 0.68rem;
 }
 
-/* 隱藏場地文字，避免影響布局 */
-.field-zone__header,
-.field-zone__card-name,
-.battlefield-summary,
-.zone-legend {
-  display: none;
-}
-
 /* Bottom operations panel */
 .battle-ops-panel {
-  margin-top: 18px;
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: 0;
-  z-index: 20;
-  backdrop-filter: blur(4px);
+  z-index: 40;
+  margin: 0;
+  border-radius: 14px 14px 0 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: linear-gradient(160deg, rgba(19, 31, 57, 0.98), rgba(10, 18, 34, 0.98));
+  backdrop-filter: blur(6px);
+  transition: transform 220ms ease;
+}
+
+.battle-ops-panel.is-collapsed {
+  transform: translateY(calc(100% - 56px));
+}
+
+.battle-ops-panel.is-open {
+  transform: translateY(0);
+}
+
+.battle-ops-panel__toolbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.battle-ops-panel__toolbar h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.battle-drawer-tabs {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.battle-drawer-tabs button {
+  padding: 6px 12px;
+}
+
+.battle-drawer-tabs button.is-active {
+  border-color: #ffe48a;
+  box-shadow: 0 0 0 2px rgba(255, 228, 138, 0.25);
+  color: #fff8d8;
+}
+
+.battle-ops-panel__toggle {
+  min-width: 72px;
+}
+
+.battle-ops-panel__body {
+  margin-top: 10px;
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  padding-bottom: 6px;
+}
+
+.battle-ops-panel.is-collapsed .battle-ops-panel__body {
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  padding-bottom: 0;
 }
 
 .hand-rack {
-  margin-top: 12px;
+  margin-top: 8px;
   display: flex;
   gap: 10px;
   overflow-x: auto;
@@ -1168,7 +1225,7 @@ select {
 }
 
 .battle-ops-panel__hint {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: #ffe7a1;
 }
 
@@ -1197,9 +1254,9 @@ select {
 }
 
 .battle-ops-panel__attack {
-  margin-top: 14px;
+  margin-top: 12px;
   border-top: 1px solid rgba(183, 196, 227, 0.25);
-  padding-top: 12px;
+  padding-top: 10px;
 }
 
 .battle-ops-panel__attack h3 {
@@ -1219,6 +1276,10 @@ select {
   gap: 6px;
   font-size: 0.86rem;
   color: #d8e6ff;
+}
+
+.battle-log-panel--drawer {
+  margin-top: 8px;
 }
 
 .battle-decision-panel {
@@ -1492,7 +1553,14 @@ select {
   }
 
   .battle-ops-panel {
-    position: static;
+    left: 0;
+    right: 0;
+    border-radius: 12px 12px 0 0;
+  }
+
+  .battle-ops-panel__toolbar {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .battle-ops-panel__attack-grid {

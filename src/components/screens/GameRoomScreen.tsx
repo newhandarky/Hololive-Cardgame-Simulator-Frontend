@@ -475,6 +475,8 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const [pendingStageMove, setPendingStageMove] = useState<StageMoveDraft | null>(null);
   const [infoModalMessage, setInfoModalMessage] = useState<string | null>(null);
   const [showConcedeConfirm, setShowConcedeConfirm] = useState(false);
+  const [battleDrawerOpen, setBattleDrawerOpen] = useState(false);
+  const [battleDrawerTab, setBattleDrawerTab] = useState<'HAND' | 'LOG'>('HAND');
   const lastExternalErrorRef = useRef<string | null>(null);
   const [selectedDecisionCardInstanceIds, setSelectedDecisionCardInstanceIds] = useState<number[]>([]);
   const [selectedInteractionCardInstanceIds, setSelectedInteractionCardInstanceIds] = useState<number[]>([]);
@@ -1092,103 +1094,170 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         onMyZoneCardClick={handleMyZoneCardClick}
       />
 
-      <section className="panel battle-ops-panel">
-        <h2>手牌與操作</h2>
-        {activePendingInteraction ? (
-          <p className="battle-ops-panel__hint">目前有待確認互動，請先完成彈窗確認。</p>
-        ) : null}
-        {activePendingDecision ? (
-          <p className="battle-ops-panel__hint">目前有待處理效果，請先完成下方「效果選擇」。</p>
-        ) : null}
-
-        <div className="hand-rack">
-          {myHandCards.length === 0 ? <p className="hand-rack__empty">目前沒有手牌。</p> : null}
-          {myHandCards.map((card) => {
-            const info = cardInfoById[card.cardId];
-            const type = cardType(card);
-            const availability = resolveHandActionAvailability(card);
-            const disabled = busy || availability.kind == null;
-            const title = availability.selectable
-              ? '點擊執行操作'
-              : (availability.reason ?? '目前不可操作');
-
-            return (
-              <button
-                key={card.cardInstanceId}
-                type="button"
-                className="hand-card"
-                disabled={disabled}
-                onClick={() => openHandAction(card)}
-                title={title}
-              >
-                {info?.imageUrl ? (
-                  <img className="card-visual card-visual--front" src={info.imageUrl} alt={info.name} loading="lazy" />
-                ) : (
-                  <div className="card-visual card-visual--placeholder">
-                    <span>{info?.name ?? card.cardId}</span>
-                  </div>
-                )}
-                <span className="hand-card__name">{info?.name ?? '載入中'}</span>
-                <span className="hand-card__meta">{cardTypeLabel(type)}</span>
-                {!availability.selectable && availability.kind ? (
-                  <span className="hand-card__meta">不可用：{availability.reason ?? '目前不可操作'}</span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="battle-ops-panel__attack">
-          <h3>攻擊操作</h3>
-          <div className="battle-ops-panel__attack-grid">
-            <label>
-              攻擊者（CENTER）
-              <select
-                value={attackerCardInstanceId ?? ''}
-                onChange={(event) => setAttackerCardInstanceId(event.target.value ? Number(event.target.value) : null)}
-              >
-                <option value="">選擇攻擊者</option>
-                {myCenterHolomems.map((card) => (
-                  <option key={card.cardInstanceId} value={card.cardInstanceId}>
-                    {cardName(card)} ({card.zone})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              目標（可選）
-              <select
-                value={attackTargetCardInstanceId ?? ''}
-                onChange={(event) =>
-                  setAttackTargetCardInstanceId(event.target.value ? Number(event.target.value) : null)
-                }
-              >
-                <option value="">不指定目標</option>
-                {opponentTargets.map((card) => (
-                  <option key={card.cardInstanceId} value={card.cardInstanceId}>
-                    {cardName(card)} ({card.zone})
-                  </option>
-                ))}
-              </select>
-            </label>
-
+      <section className={`panel battle-ops-panel ${battleDrawerOpen ? 'is-open' : 'is-collapsed'}`}>
+        <div className="battle-ops-panel__toolbar">
+          <h2>手牌與操作</h2>
+          <div className="battle-drawer-tabs">
             <button
               type="button"
-              disabled={!canSubmitAction || attackerCardInstanceId == null}
-              onClick={() => {
-                if (attackerCardInstanceId == null) {
-                  return;
-                }
-                void onAttackArt({
-                  attackerCardInstanceId,
-                  targetCardInstanceId: attackTargetCardInstanceId,
-                });
-              }}
+              className={battleDrawerTab === 'HAND' ? 'is-active' : ''}
+              onClick={() => setBattleDrawerTab('HAND')}
             >
-              攻擊
+              手牌
+            </button>
+            <button
+              type="button"
+              className={battleDrawerTab === 'LOG' ? 'is-active' : ''}
+              onClick={() => setBattleDrawerTab('LOG')}
+            >
+              最近行動
             </button>
           </div>
+          <button type="button" className="battle-ops-panel__toggle" onClick={() => setBattleDrawerOpen((v) => !v)}>
+            {battleDrawerOpen ? '收合' : '展開'}
+          </button>
+        </div>
+
+        <div className="battle-ops-panel__body">
+          {activePendingInteraction ? (
+            <p className="battle-ops-panel__hint">目前有待確認互動，請先完成彈窗確認。</p>
+          ) : null}
+          {activePendingDecision ? (
+            <p className="battle-ops-panel__hint">目前有待處理效果，請先完成下方「效果選擇」。</p>
+          ) : null}
+
+          {battleDrawerTab === 'HAND' ? (
+            <>
+              <div className="hand-rack">
+                {myHandCards.length === 0 ? <p className="hand-rack__empty">目前沒有手牌。</p> : null}
+                {myHandCards.map((card) => {
+                  const info = cardInfoById[card.cardId];
+                  const type = cardType(card);
+                  const availability = resolveHandActionAvailability(card);
+                  const disabled = busy || availability.kind == null;
+                  const title = availability.selectable
+                    ? '點擊執行操作'
+                    : (availability.reason ?? '目前不可操作');
+
+                  return (
+                    <button
+                      key={card.cardInstanceId}
+                      type="button"
+                      className="hand-card"
+                      disabled={disabled}
+                      onClick={() => openHandAction(card)}
+                      title={title}
+                    >
+                      {info?.imageUrl ? (
+                        <img className="card-visual card-visual--front" src={info.imageUrl} alt={info.name} loading="lazy" />
+                      ) : (
+                        <div className="card-visual card-visual--placeholder">
+                          <span>{info?.name ?? card.cardId}</span>
+                        </div>
+                      )}
+                      <span className="hand-card__name">{info?.name ?? '載入中'}</span>
+                      <span className="hand-card__meta">{cardTypeLabel(type)}</span>
+                      {!availability.selectable && availability.kind ? (
+                        <span className="hand-card__meta">不可用：{availability.reason ?? '目前不可操作'}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="battle-ops-panel__attack">
+                <h3>攻擊操作</h3>
+                <div className="battle-ops-panel__attack-grid">
+                  <label>
+                    攻擊者（CENTER）
+                    <select
+                      value={attackerCardInstanceId ?? ''}
+                      onChange={(event) => setAttackerCardInstanceId(event.target.value ? Number(event.target.value) : null)}
+                    >
+                      <option value="">選擇攻擊者</option>
+                      {myCenterHolomems.map((card) => (
+                        <option key={card.cardInstanceId} value={card.cardInstanceId}>
+                          {cardName(card)} ({card.zone})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    目標（可選）
+                    <select
+                      value={attackTargetCardInstanceId ?? ''}
+                      onChange={(event) =>
+                        setAttackTargetCardInstanceId(event.target.value ? Number(event.target.value) : null)
+                      }
+                    >
+                      <option value="">不指定目標</option>
+                      {opponentTargets.map((card) => (
+                        <option key={card.cardInstanceId} value={card.cardInstanceId}>
+                          {cardName(card)} ({card.zone})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={!canSubmitAction || attackerCardInstanceId == null}
+                    onClick={() => {
+                      if (attackerCardInstanceId == null) {
+                        return;
+                      }
+                      void onAttackArt({
+                        attackerCardInstanceId,
+                        targetCardInstanceId: attackTargetCardInstanceId,
+                      });
+                    }}
+                  >
+                    攻擊
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="battle-log-panel battle-log-panel--drawer">
+              {recentActions.length === 0 ? (
+                <p className="battle-log-panel__empty">尚無行動紀錄。</p>
+              ) : (
+                <ul className="battle-log-list">
+                  {recentActions.map((action) => {
+                    const bloomSummary = resolveBloomSummary(action);
+                    return (
+                      <li key={action.actionId} className="battle-log-item">
+                        <div className="battle-log-item__header">
+                          <strong>{action.actionType}</strong>
+                          <span>
+                            T{action.turnNumber}-{action.actionOrder} {actionActorLabel(action)}
+                          </span>
+                        </div>
+
+                        {bloomSummary ? (
+                          <div className="battle-log-item__detail">
+                            {bloomSummary.diceRoll != null ? <p>骰值：{bloomSummary.diceRoll}</p> : null}
+                            <p>
+                              請求效果：
+                              {bloomSummary.requestedEffects.length > 0 ? bloomSummary.requestedEffects.join(', ') : '無'}
+                            </p>
+                            <p>
+                              實際執行：
+                              {bloomSummary.executedEffects.length > 0 ? bloomSummary.executedEffects.join(', ') : '無'}
+                            </p>
+                            {bloomSummary.unsupportedEffects.length > 0 ? (
+                              <p>未支援：{bloomSummary.unsupportedEffects.join(', ')}</p>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
@@ -1226,47 +1295,6 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
           </div>
         </section>
       ) : null}
-
-      <section className="panel battle-log-panel">
-        <h2>最近行動</h2>
-        {recentActions.length === 0 ? (
-          <p className="battle-log-panel__empty">尚無行動紀錄。</p>
-        ) : (
-          <ul className="battle-log-list">
-            {recentActions.map((action) => {
-              const bloomSummary = resolveBloomSummary(action);
-              return (
-                <li key={action.actionId} className="battle-log-item">
-                  <div className="battle-log-item__header">
-                    <strong>{action.actionType}</strong>
-                    <span>
-                      T{action.turnNumber}-{action.actionOrder} {actionActorLabel(action)}
-                    </span>
-                  </div>
-
-                  {bloomSummary ? (
-                    <div className="battle-log-item__detail">
-                      {bloomSummary.diceRoll != null ? <p>骰值：{bloomSummary.diceRoll}</p> : null}
-                      <p>
-                        請求效果：
-                        {bloomSummary.requestedEffects.length > 0 ? bloomSummary.requestedEffects.join(', ') : '無'}
-                      </p>
-                      <p>
-                        實際執行：
-                        {bloomSummary.executedEffects.length > 0 ? bloomSummary.executedEffects.join(', ') : '無'}
-                      </p>
-                      {bloomSummary.unsupportedEffects.length > 0 ? (
-                        <p>未支援：{bloomSummary.unsupportedEffects.join(', ')}</p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
       {pendingHandAction ? (
         <section className="battle-action-modal" role="dialog" aria-modal="true">
           <button
