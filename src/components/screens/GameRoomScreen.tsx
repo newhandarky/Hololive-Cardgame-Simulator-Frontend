@@ -32,8 +32,10 @@ interface GameRoomScreenProps {
   onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
   onDrawTurn: () => Promise<void>;
   onSendTurnCheer: () => Promise<void>;
+  onAdvancePhase: () => Promise<void>;
   onMoveStageHolomem: (payload: MoveStageHolomemActionRequest) => Promise<void>;
   onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
+  onMulligan: (payload: { useMulligan: boolean }) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onConcede: () => Promise<void>;
   errorMessage: string | null;
@@ -335,8 +337,10 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   onAttackArt,
   onDrawTurn,
   onSendTurnCheer,
+  onAdvancePhase,
   onMoveStageHolomem,
   onResolveDecision,
+  onMulligan,
   onEndTurn,
   onConcede,
   errorMessage,
@@ -481,15 +485,33 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   const [selectedDecisionCardInstanceIds, setSelectedDecisionCardInstanceIds] = useState<number[]>([]);
   const [selectedInteractionCardInstanceIds, setSelectedInteractionCardInstanceIds] = useState<number[]>([]);
   const [selectedInteractionPlacement, setSelectedInteractionPlacement] = useState<'TOP' | 'BOTTOM' | null>(null);
+  const [selectedInteractionConfirmed, setSelectedInteractionConfirmed] = useState<boolean | null>(null);
+  const [showMulliganModal, setShowMulliganModal] = useState(true);
 
   useEffect(() => {
     setSelectedDecisionCardInstanceIds([]);
   }, [activePendingDecision?.decisionId]);
 
   useEffect(() => {
-    setSelectedInteractionCardInstanceIds([]);
+    setSelectedInteractionCardInstanceIds(
+      activePendingInteraction?.interactionType === 'REORDER_DECK_BOTTOM'
+        ? activePendingInteraction.cards.map((card) => card.cardInstanceId)
+        : [],
+    );
     setSelectedInteractionPlacement(null);
+    setSelectedInteractionConfirmed(null);
   }, [activePendingInteraction?.interactionId]);
+
+  const orderedReorderInteractionCards = useMemo(() => {
+    if (activePendingInteraction?.interactionType !== 'REORDER_DECK_BOTTOM') {
+      return [];
+    }
+    const cardById = new Map(activePendingInteraction.cards.map((card) => [card.cardInstanceId, card] as const));
+    return selectedInteractionCardInstanceIds.flatMap((cardInstanceId) => {
+      const card = cardById.get(cardInstanceId);
+      return card ? [card] : [];
+    });
+  }, [activePendingInteraction, selectedInteractionCardInstanceIds]);
 
   useEffect(() => {
     if (!myCenterHolomems.some((card) => card.cardInstanceId === attackerCardInstanceId)) {
@@ -504,6 +526,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
   }, [attackTargetCardInstanceId, opponentTargets]);
 
   const recentActions = currentGameState?.recentActions ?? [];
+  const currentPhase = currentGameState?.phase ?? 'RESET';
 
   const canSubmitAction =
     !busy &&
@@ -511,6 +534,19 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     currentGameState?.status === 'STARTED' &&
     !activePendingDecision &&
     !activePendingInteraction;
+  const isResetPhase = currentGameState?.phase === 'RESET';
+  const isMulliganDone = Boolean(myState?.mulliganDone);
+  const hasOpeningCenterOnBoard = (myState?.centerCount ?? 0) > 0;
+  const shouldRequireMulliganDecision =
+    isResetPhase && isMyTurn && !activePendingInteraction && !activePendingDecision && !isMulliganDone;
+
+  useEffect(() => {
+    if (shouldRequireMulliganDecision) {
+      setShowMulliganModal(true);
+      return;
+    }
+    setShowMulliganModal(false);
+  }, [shouldRequireMulliganDecision, currentGameState?.turnNumber]);
 
   const myCollabHolomems = useMemo(() => {
     return myBoardZones.find((zone) => zone.zone === 'COLLAB')?.cards ?? [];
@@ -533,6 +569,11 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     () => myTurnActions.some((action) => action.actionType === 'TURN_CHEER'),
     [myTurnActions],
   );
+  const hasOpeningCenterByAction = useMemo(
+    () => myTurnActions.some((action) => action.actionType === 'OPENING_SET_CENTER'),
+    [myTurnActions],
+  );
+  const hasOpeningCenter = hasOpeningCenterOnBoard || hasOpeningCenterByAction;
 
   const resolveGlobalActionBlockReason = (): string | null => {
     if (busy) {
@@ -543,6 +584,9 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     }
     if (currentGameState?.status !== 'STARTED') {
       return '對戰尚未開始或已結束。';
+    }
+    if (isResetPhase && !isMulliganDone) {
+      return '請先完成起手調度（Mulligan）';
     }
     if (activePendingDecision) {
       return '目前有待處理效果，請先完成「效果選擇」。';
@@ -645,6 +689,26 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       return { kind, selectable: false, reason: blockedReason };
     }
 
+    if (isResetPhase) {
+      if (kind !== 'PLAY_TO_STAGE') {
+        return { kind, selectable: false, reason: 'RESET 階段只能設置開場 Holomem。' };
+      }
+      const level = (cardInfoById[card.cardId]?.levelType ?? '').toUpperCase();
+      if (!hasOpeningCenter) {
+        if (level !== 'DEBUT') {
+          return { kind, selectable: false, reason: '開場 CENTER 只能放置 DEBUT Holomem。' };
+        }
+        return { kind, selectable: true };
+      }
+      if (level !== 'DEBUT' && level !== 'SPOT') {
+        return { kind, selectable: false, reason: '開場 BACK 只能放置 DEBUT 或 SPOT Holomem。' };
+      }
+      if (myBackHolomems.length >= 5) {
+        return { kind, selectable: false, reason: '開場 BACK 已滿（最多 5 張）。' };
+      }
+      return { kind, selectable: true };
+    }
+
     if (kind === 'PLAY_TO_STAGE') {
       if (myBackHolomems.length >= 5) {
         return { kind, selectable: false, reason: 'BACK 已滿（最多 5 張），無法再放置。' };
@@ -703,7 +767,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     setPendingHandAction({
       card,
       kind: availability.kind,
-      targetZone: 'BACK',
+      targetZone: isResetPhase ? (hasOpeningCenter ? 'BACK' : 'CENTER') : 'BACK',
       targetHolomemCardInstanceId:
         availability.kind === 'ATTACH_CHEER'
           ? (myHolomems[0]?.cardInstanceId ?? null)
@@ -883,22 +947,82 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     setInfoModalMessage(errorMessage);
   }, [errorMessage]);
 
-  const handleEndTurnClick = async () => {
-    if (busy || !isMyTurn) {
+  const phaseActionLabel = (() => {
+    switch (currentPhase) {
+      case 'RESET':
+        return '完成開場設置';
+      case 'DRAW':
+        return '請先抽牌';
+      case 'CHEER':
+        return '請先發送吶喊';
+      case 'MAIN':
+        return '結束主要階段';
+      case 'PERFORMANCE':
+        return '結束表演階段';
+      case 'END':
+        return '結束回合';
+      default:
+        return '回合操作';
+    }
+  })();
+
+  const handlePrimaryPhaseActionClick = async () => {
+    if (busy || !isMyTurn || currentMatch.status !== 'STARTED') {
       return;
     }
-    const missing: string[] = [];
-    if (!hasUsedTurnDraw) {
-      missing.push('抽卡');
-    }
-    if (canPerformTurnCheer && !hasUsedTurnCheer) {
-      missing.push('發送吶喊');
-    }
-    if (missing.length > 0) {
-      setInfoModalMessage(`回合尚未完成：${missing.join('、')}。請先完成後再結束回合。`);
+    if (activePendingDecision) {
+      setInfoModalMessage('目前有待處理效果，請先完成「效果選擇」。');
       return;
     }
-    await onEndTurn();
+    if (activePendingInteraction) {
+      setInfoModalMessage('目前有待確認互動，請先完成彈窗確認。');
+      return;
+    }
+
+    switch (currentPhase) {
+      case 'RESET':
+        if (!isMulliganDone) {
+          setShowMulliganModal(true);
+          return;
+        }
+        if (!hasOpeningCenter) {
+          setInfoModalMessage('請先從手牌放置 1 張 DEBUT 到 CENTER。');
+          return;
+        }
+        await onAdvancePhase();
+        return;
+      case 'DRAW':
+        setInfoModalMessage('請先點擊我方牌庫執行抽牌。');
+        return;
+      case 'CHEER':
+        setInfoModalMessage(
+          canPerformTurnCheer ? '請先點擊我方 Cheer Deck 發送吶喊。' : '目前沒有可執行的吶喊操作。',
+        );
+        return;
+      case 'MAIN': {
+        const missing: string[] = [];
+        if (!hasUsedTurnDraw) {
+          missing.push('抽卡');
+        }
+        if (canPerformTurnCheer && !hasUsedTurnCheer) {
+          missing.push('發送吶喊');
+        }
+        if (missing.length > 0) {
+          setInfoModalMessage(`回合尚未完成：${missing.join('、')}。請先完成後再推進階段。`);
+          return;
+        }
+        await onAdvancePhase();
+        return;
+      }
+      case 'PERFORMANCE':
+        await onAdvancePhase();
+        return;
+      case 'END':
+        await onEndTurn();
+        return;
+      default:
+        setInfoModalMessage(`目前 phase=${currentPhase}，沒有可執行的主操作。`);
+    }
   };
 
   const handleConcedeClick = () => {
@@ -957,11 +1081,34 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     });
   };
 
+  const moveInteractionCardInOrder = (cardInstanceId: number, offset: -1 | 1) => {
+    if (!activePendingInteraction || activePendingInteraction.interactionType !== 'REORDER_DECK_BOTTOM' || busy) {
+      return;
+    }
+    setSelectedInteractionCardInstanceIds((previous) => {
+      const index = previous.indexOf(cardInstanceId);
+      if (index < 0) {
+        return previous;
+      }
+      const nextIndex = index + offset;
+      if (nextIndex < 0 || nextIndex >= previous.length) {
+        return previous;
+      }
+      const next = [...previous];
+      const [moved] = next.splice(index, 1);
+      next.splice(nextIndex, 0, moved);
+      return next;
+    });
+  };
+
   const canConfirmInteraction = useMemo(() => {
     if (!activePendingInteraction || busy) {
       return false;
     }
     if (activePendingInteraction.interactionType === 'TURN_START') {
+      return true;
+    }
+    if (activePendingInteraction.interactionType === 'LIVE_START') {
       return true;
     }
     if (activePendingInteraction.interactionType === 'DRAW_REVEAL') {
@@ -970,6 +1117,18 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
     if (activePendingInteraction.interactionType === 'LOOK_TOP_DECK') {
       return selectedInteractionPlacement != null;
     }
+    if (activePendingInteraction.interactionType === 'LOOK_OPPONENT_HAND') {
+      return true;
+    }
+    if (activePendingInteraction.interactionType === 'LOOK_HOLOPOWER') {
+      return true;
+    }
+    if (activePendingInteraction.interactionType === 'TRIGGER_EFFECT_CONFIRM') {
+      return selectedInteractionConfirmed != null;
+    }
+    if (activePendingInteraction.interactionType === 'REORDER_DECK_BOTTOM') {
+      return selectedInteractionCardInstanceIds.length === activePendingInteraction.cards.length;
+    }
     if (activePendingInteraction.interactionType === 'SEND_CHEER') {
       return (
         selectedInteractionCardInstanceIds.length >= Math.max(activePendingInteraction.minSelect, 1) &&
@@ -977,13 +1136,31 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
       );
     }
     return false;
-  }, [activePendingInteraction, busy, selectedInteractionCardInstanceIds, selectedInteractionPlacement]);
+  }, [
+    activePendingInteraction,
+    busy,
+    selectedInteractionCardInstanceIds,
+    selectedInteractionPlacement,
+    selectedInteractionConfirmed,
+  ]);
 
   const actionActorLabel = (action: RecentMatchAction): string => {
     if (currentUserId == null) {
       return `玩家 #${action.userId}`;
     }
     return action.userId === currentUserId ? '我方' : '對手';
+  };
+
+  const actionTypeLabel = (action: RecentMatchAction): string => {
+    if (action.actionType === 'TRIGGER_EFFECT_EXECUTED' || action.actionType === 'TRIGGER_EFFECT_SKIPPED') {
+      const payload = asRecord(action.payload);
+      const sourceActionType = typeof payload?.sourceActionType === 'string' ? payload.sourceActionType.toUpperCase() : '';
+      const sourceLabel = sourceActionType === 'BLOOM' ? 'BLOOM' : sourceActionType === 'COLLAB' ? '連動' : '觸發';
+      return action.actionType === 'TRIGGER_EFFECT_EXECUTED'
+        ? `${sourceLabel}效果已執行`
+        : `${sourceLabel}效果已略過`;
+    }
+    return action.actionType;
   };
 
   const resolveBloomSummary = (action: RecentMatchAction): BloomActionSummary | null => {
@@ -1069,8 +1246,12 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         </div>
 
         <div className="screen-header__actions">
-          <button type="button" onClick={() => void handleEndTurnClick()} disabled={busy || !isMyTurn}>
-            End Turn
+          <button
+            type="button"
+            onClick={() => void handlePrimaryPhaseActionClick()}
+            disabled={busy || !isMyTurn || currentMatch.status !== 'STARTED'}
+          >
+            {phaseActionLabel}
           </button>
           <button type="button" onClick={handleConcedeClick} disabled={busy || currentMatch.status !== 'STARTED'}>
             投降
@@ -1229,7 +1410,7 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                     return (
                       <li key={action.actionId} className="battle-log-item">
                         <div className="battle-log-item__header">
-                          <strong>{action.actionType}</strong>
+                          <strong>{actionTypeLabel(action)}</strong>
                           <span>
                             T{action.turnNumber}-{action.actionOrder} {actionActorLabel(action)}
                           </span>
@@ -1548,12 +1729,71 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
         </section>
       ) : null}
 
+      {shouldRequireMulliganDecision && !showMulliganModal ? (
+        <button
+          type="button"
+          className="battle-mulligan-reminder"
+          onClick={() => setShowMulliganModal(true)}
+          disabled={busy}
+        >
+          開啟起手調度
+        </button>
+      ) : null}
+
+      {shouldRequireMulliganDecision && showMulliganModal ? (
+        <section className="battle-action-modal" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="battle-action-modal__backdrop"
+            aria-label="起手調度背景"
+            onClick={() => setShowMulliganModal(false)}
+          />
+          <div className="battle-action-modal__panel">
+            <h3>起手調度（Mulligan）</h3>
+            <p>請先查看手牌後再決定是否重抽。每次重抽會使起始手牌數 -1。</p>
+            <div className="battle-action-modal__actions">
+              <button type="button" disabled={busy} onClick={() => setShowMulliganModal(false)}>
+                先看手牌
+              </button>
+              <button type="button" disabled={busy} onClick={() => void onMulligan({ useMulligan: true })}>
+                是，重抽
+              </button>
+              <button type="button" disabled={busy} onClick={() => void onMulligan({ useMulligan: false })}>
+                否，完成調度
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {isResetPhase &&
+      isMyTurn &&
+      !activePendingInteraction &&
+      !activePendingDecision &&
+      isMulliganDone &&
+      !hasOpeningCenter &&
+      !pendingHandAction &&
+      !pendingStageMove &&
+      !infoModalMessage ? (
+        <section className="battle-action-modal battle-action-modal--non-blocking" role="dialog" aria-modal="false">
+          <div className="battle-action-modal__panel">
+            <h3>開場設置</h3>
+            <p>請從手牌點選 1 張 DEBUT Holomem 放置到 CENTER（將以背面呈現）。</p>
+            <div className="battle-action-modal__actions">
+              <button type="button" disabled>
+                等待你放置 CENTER
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {activePendingInteraction ? (
         <section className="battle-action-modal" role="dialog" aria-modal="true">
           <button type="button" className="battle-action-modal__backdrop" aria-label="待確認互動背景" />
           <div className="battle-action-modal__panel">
             <h3>{activePendingInteraction.title ?? '待確認互動'}</h3>
-            <p>{activePendingInteraction.message ?? '請確認後繼續。'}</p>
+            <p style={{ whiteSpace: 'pre-line' }}>{activePendingInteraction.message ?? '請確認後繼續。'}</p>
 
             <div className="battle-interaction-modal__cards">
               {activePendingInteraction.cards.map((card) =>
@@ -1591,6 +1831,75 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
               </div>
             ) : null}
 
+            {activePendingInteraction.interactionType === 'REORDER_DECK_BOTTOM' ? (
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                <p className="battle-action-modal__effect" style={{ marginBottom: 0 }}>
+                  使用上下按鈕調整順序，最上方的卡會最先放到牌庫底。
+                </p>
+                {orderedReorderInteractionCards.map((card, index) => (
+                  <div
+                    key={card.cardInstanceId}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'auto 1fr auto',
+                      gap: '0.75rem',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <strong style={{ minWidth: '1.5rem', textAlign: 'center' }}>{index + 1}</strong>
+                    {renderTargetCandidateCard(card, {
+                      selected: true,
+                      selectable: false,
+                      showZone: true,
+                    })}
+                    <div style={{ display: 'grid', gap: '0.35rem' }}>
+                      <button
+                        type="button"
+                        className="battle-interaction-modal__placement-option"
+                        disabled={busy || index === 0}
+                        onClick={() => moveInteractionCardInOrder(card.cardInstanceId, -1)}
+                      >
+                        上移
+                      </button>
+                      <button
+                        type="button"
+                        className="battle-interaction-modal__placement-option"
+                        disabled={busy || index === orderedReorderInteractionCards.length - 1}
+                        onClick={() => moveInteractionCardInOrder(card.cardInstanceId, 1)}
+                      >
+                        下移
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {activePendingInteraction.interactionType === 'TRIGGER_EFFECT_CONFIRM' ? (
+              <div className="battle-interaction-modal__placement">
+                <button
+                  type="button"
+                  className={`battle-interaction-modal__placement-option${
+                    selectedInteractionConfirmed === true ? ' is-selected' : ''
+                  }`}
+                  disabled={busy}
+                  onClick={() => setSelectedInteractionConfirmed(true)}
+                >
+                  執行效果
+                </button>
+                <button
+                  type="button"
+                  className={`battle-interaction-modal__placement-option${
+                    selectedInteractionConfirmed === false ? ' is-selected' : ''
+                  }`}
+                  disabled={busy}
+                  onClick={() => setSelectedInteractionConfirmed(false)}
+                >
+                  略過效果
+                </button>
+              </div>
+            ) : null}
+
             <div className="battle-action-modal__actions">
               <button
                 type="button"
@@ -1599,17 +1908,30 @@ export const GameRoomScreen: FC<GameRoomScreenProps> = ({
                   void onResolveDecision({
                     decisionId: activePendingInteraction.interactionId,
                     selectedCardInstanceIds:
-                      activePendingInteraction.interactionType === 'SEND_CHEER'
+                      activePendingInteraction.interactionType === 'SEND_CHEER' ||
+                      activePendingInteraction.interactionType === 'REORDER_DECK_BOTTOM'
                         ? selectedInteractionCardInstanceIds
                         : [],
                     placement:
                       activePendingInteraction.interactionType === 'LOOK_TOP_DECK'
                         ? selectedInteractionPlacement ?? undefined
                         : undefined,
+                    confirmed:
+                      activePendingInteraction.interactionType === 'TRIGGER_EFFECT_CONFIRM'
+                        ? selectedInteractionConfirmed ?? undefined
+                        : undefined,
                   })
                 }
               >
-                確認
+                {activePendingInteraction.interactionType === 'TRIGGER_EFFECT_CONFIRM' &&
+                selectedInteractionConfirmed === false
+                  ? '確認略過'
+                  : activePendingInteraction.interactionType === 'REORDER_DECK_BOTTOM'
+                    ? '確認排序'
+                    : activePendingInteraction.interactionType === 'LOOK_OPPONENT_HAND' ||
+                        activePendingInteraction.interactionType === 'LOOK_HOLOPOWER'
+                      ? '完成查看'
+                      : '確認'}
               </button>
             </div>
           </div>

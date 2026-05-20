@@ -208,9 +208,11 @@ export interface PlayerZoneState {
   handCount: number;
   boardZones: BoardZoneState[];
   handCards: ZoneCardInstance[];
+  mulliganUsed?: boolean;
+  mulliganDone?: boolean;
 }
 
-export type MatchPhase = 'RESET' | 'MAIN' | 'PERFORMANCE' | 'END';
+export type MatchPhase = 'RESET' | 'DRAW' | 'CHEER' | 'MAIN' | 'PERFORMANCE' | 'END';
 
 export interface ZoneCardInstance {
   cardInstanceId: number;
@@ -338,6 +340,11 @@ export interface ResolveDecisionActionRequest {
   decisionId: number;
   selectedCardInstanceIds?: number[];
   placement?: 'TOP' | 'BOTTOM';
+  confirmed?: boolean;
+}
+
+export interface MulliganActionRequest {
+  useMulligan: boolean;
 }
 
 export interface MoveStageHolomemActionRequest {
@@ -473,6 +480,11 @@ export const sendTurnCheer = async (matchId: number): Promise<LobbyMatch> => {
   return response.data;
 };
 
+export const advancePhase = async (matchId: number): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/advance-phase`);
+  return response.data;
+};
+
 export const moveStageHolomem = async (
   matchId: number,
   payload: MoveStageHolomemActionRequest,
@@ -496,6 +508,14 @@ export const resolveDecision = async (
   payload: ResolveDecisionActionRequest,
 ): Promise<LobbyMatch> => {
   const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/resolve-decision`, payload);
+  return response.data;
+};
+
+export const mulligan = async (
+  matchId: number,
+  payload: MulliganActionRequest,
+): Promise<LobbyMatch> => {
+  const response = await api.post<LobbyMatch>(`/matches/${matchId}/actions/mulligan`, payload);
   return response.data;
 };
 

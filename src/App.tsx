@@ -11,6 +11,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 import { BackgroundGalleryPage } from './pages/BackgroundGalleryPage';
 import {
   activateMyDeck,
+  advancePhase,
   attachCheer,
   attackArt,
   bloom,
@@ -30,6 +31,7 @@ import {
   joinMatch,
   loginWithLine,
   moveStageHolomem,
+  mulligan,
   playSupport,
   playToStage,
   resolveDecision,
@@ -47,6 +49,7 @@ import {
   type LobbyMatch,
   type LobbyPlayer,
   type MoveStageHolomemActionRequest,
+  type MulliganActionRequest,
   type PlaySupportActionRequest,
   type PlayToStageActionRequest,
   type ResolveDecisionActionRequest,
@@ -143,8 +146,10 @@ interface GameRoomRouteProps {
   onAttackArt: (payload: AttackArtActionRequest) => Promise<void>;
   onDrawTurn: () => Promise<void>;
   onSendTurnCheer: () => Promise<void>;
+  onAdvancePhase: () => Promise<void>;
   onMoveStageHolomem: (payload: MoveStageHolomemActionRequest) => Promise<void>;
   onResolveDecision: (payload: ResolveDecisionActionRequest) => Promise<void>;
+  onMulligan: (payload: MulliganActionRequest) => Promise<void>;
   onEndTurn: () => Promise<void>;
   onConcede: () => Promise<void>;
   errorMessage: string | null;
@@ -167,8 +172,10 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
   onAttackArt,
   onDrawTurn,
   onSendTurnCheer,
+  onAdvancePhase,
   onMoveStageHolomem,
   onResolveDecision,
+  onMulligan,
   onEndTurn,
   onConcede,
   errorMessage,
@@ -217,8 +224,10 @@ const GameRoomRoute: FC<GameRoomRouteProps> = ({
       onAttackArt={onAttackArt}
       onDrawTurn={onDrawTurn}
       onSendTurnCheer={onSendTurnCheer}
+      onAdvancePhase={onAdvancePhase}
       onMoveStageHolomem={onMoveStageHolomem}
       onResolveDecision={onResolveDecision}
+      onMulligan={onMulligan}
       onEndTurn={onEndTurn}
       onConcede={onConcede}
       errorMessage={errorMessage}
@@ -517,6 +526,15 @@ const App: FC = () => {
     // 僅在頁面載入時初始化一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 回到 Lobby 時重新同步牌組，避免 Deck Editor 新建後下拉仍是舊資料。
+  useEffect(() => {
+    if (!location.pathname.startsWith('/lobby')) {
+      return;
+    }
+    void loadMyDecks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1021,6 +1039,26 @@ const App: FC = () => {
     }
   };
 
+  const handleAdvancePhase = async () => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => advancePhase(currentMatch.matchId));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'ADVANCE_PHASE 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleMoveStageHolomem = async (payload: MoveStageHolomemActionRequest) => {
     if (!currentMatch) {
       return;
@@ -1034,6 +1072,26 @@ const App: FC = () => {
       await loadGameState(match.matchId);
     } catch (err) {
       setError(getApiErrorMessage(err, 'MOVE_STAGE_HOLOMEM 失敗'));
+      console.error(err);
+      await syncMatchState(currentMatch.matchId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMulligan = async (payload: MulliganActionRequest) => {
+    if (!currentMatch) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const match = await withReauth(() => mulligan(currentMatch.matchId, payload));
+      setCurrentMatch(match);
+      await loadGameState(match.matchId);
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'MULLIGAN 失敗'));
       console.error(err);
       await syncMatchState(currentMatch.matchId);
     } finally {
@@ -1152,8 +1210,10 @@ const App: FC = () => {
               onAttackArt={handleAttackArt}
               onDrawTurn={handleDrawTurn}
               onSendTurnCheer={handleSendTurnCheer}
+              onAdvancePhase={handleAdvancePhase}
               onMoveStageHolomem={handleMoveStageHolomem}
               onResolveDecision={handleResolveDecision}
+              onMulligan={handleMulligan}
               onEndTurn={handleEndTurn}
               onConcede={handleConcede}
               errorMessage={error}

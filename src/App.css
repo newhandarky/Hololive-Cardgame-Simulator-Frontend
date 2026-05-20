@@ -1384,8 +1384,11 @@ select {
   position: fixed;
   inset: 0;
   z-index: 60;
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 10px 12px 14px;
+  overflow-y: auto;
 }
 
 .battle-action-modal__backdrop {
@@ -1393,17 +1396,21 @@ select {
   inset: 0;
   border: 0;
   background: rgba(6, 10, 20, 0.68);
+  animation: battle-modal-backdrop-fade 180ms ease-out;
 }
 
 .battle-action-modal__panel {
   position: relative;
-  width: min(560px, calc(100vw - 28px));
+  width: min(1280px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
   border-radius: 14px;
   border: 1px solid rgba(183, 196, 227, 0.35);
   background: linear-gradient(160deg, rgba(19, 31, 57, 0.98), rgba(10, 18, 34, 0.98));
   padding: 16px;
   display: grid;
   gap: 12px;
+  animation: battle-modal-slide-down 220ms ease-out;
 }
 
 .battle-action-modal__panel h3 {
@@ -1444,6 +1451,27 @@ select {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.battle-action-modal--non-blocking {
+  pointer-events: none;
+  z-index: 52;
+}
+
+.battle-action-modal--non-blocking .battle-action-modal__panel {
+  pointer-events: auto;
+}
+
+.battle-mulligan-reminder {
+  position: fixed;
+  z-index: 55;
+  top: 86px;
+  right: 16px;
+  border: 1px solid rgba(183, 196, 227, 0.45);
+  border-radius: 10px;
+  background: rgba(10, 18, 34, 0.9);
+  color: #e8f0ff;
+  padding: 8px 12px;
 }
 
 .battle-interaction-modal__cards {
@@ -1508,6 +1536,26 @@ select {
   line-height: 1.2;
 }
 
+@keyframes battle-modal-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes battle-modal-backdrop-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (max-width: 1100px) {
   .battlefield-stack {
     min-width: 1280px;
@@ -1565,5 +1613,14 @@ select {
 
   .battle-ops-panel__attack-grid {
     grid-template-columns: 1fr;
+  }
+
+  .battle-action-modal {
+    padding: 8px;
+  }
+
+  .battle-action-modal__panel {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
   }
 }
